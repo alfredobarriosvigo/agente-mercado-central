@@ -303,7 +303,18 @@ def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None
             
     resultados_filtrados = sorted(resultados_filtrados, key=lambda x: x['score'], reverse=True)
     
-    # D. DESCARTE DE RUIDO SECUNDARIO (Relative Score Thresholding)
+    # D. DEDUPLICACIÓN DE CONTENIDO (Evita duplicados exactos o extremadamente similares)
+    resultados_unicos = []
+    textos_vistos = set()
+    for r in resultados_filtrados:
+        # Normalizar quitando espacios, saltos de línea y pasando a minúsculas
+        texto_normalizado = "".join(r["Contenido"].lower().split())
+        if texto_normalizado not in textos_vistos:
+            textos_vistos.add(texto_normalizado)
+            resultados_unicos.append(r)
+    resultados_filtrados = resultados_unicos
+    
+    # E. DESCARTE DE RUIDO SECUNDARIO (Relative Score Thresholding)
     if resultados_filtrados:
         max_score = resultados_filtrados[0]['score']
         if max_score > 0.65:
