@@ -12,8 +12,6 @@ Aquí puedes visualizar el agente de IA interactuando y procesando solicitudes e
 | ----- | ----- | 
 | ![Panel principal](img/screenshot_panel.jpg) | ![Respuesta del Agente](img/screenshot_respuesta.jpg) | 
 
-*(Nota: Asegúrate de guardar tus imágenes dentro de la carpeta `img/` con los nombres `screenshot_panel.jpg` y `screenshot_respuesta.jpg` para que se visualicen correctamente aquí de forma automática).*
-
 ## 🛠️ Características Principales
 
 * **Búsqueda Semántica Híbrida:** Utiliza el modelo de embeddings local `all-MiniLM-L6-v2` para mapear de manera conceptual las intenciones de los usuarios y contrastarlas contra los manuales corporativos en PDF.
