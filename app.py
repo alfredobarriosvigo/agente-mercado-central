@@ -53,6 +53,19 @@ df_inventario = pd.DataFrame()
 documentos_extraidos = []
 columna_producto_real = None  # Almacena el nombre dinámico de la columna de productos encontrada
 
+# Diccionario exhaustivo de palabras vacías (Stop Words) en español para limpiar consultas de inventario
+STOP_WORDS_SPANISH = {
+    "y", "o", "u", "e", "de", "del", "con", "para", "por", "en", "sin", "sobre", 
+    "el", "la", "los", "las", "un", "una", "unos", "unas", "su", "sus", "tu", "tus", 
+    "mi", "mis", "este", "esta", "estos", "estas", "ese", "esa", "esos", "esas",
+    "que", "cual", "cuales", "quien", "quienes", "como", "cómo", "donde", "dónde",
+    "cuando", "cuándo", "cuanto", "cuánto", "precio", "precios", "costo", "costos", 
+    "valor", "valores", "stock", "existencia", "existencias", "cantidad", "cantidades",
+    "ubicacion", "ubicación", "pasillo", "deposito", "depósito", "gondola", "góndola",
+    "lista", "listado", "ver", "mostrar", "buscar", "consultar", "traer", "obtener",
+    "saber", "conocer", "detalle", "detalles", "informacion", "información", "tipo", "tipos"
+}
+
 
 def normalizar_texto(texto):
     """Limpia acentos, caracteres especiales y mayúsculas para un cruce de datos exacto."""
@@ -150,7 +163,7 @@ def cargar_base_de_conocimiento():
         print(f"Error al cargar Inventario.xlsx: {e}")
         df_inventario = pd.DataFrame()
 
-    # B. Cargar y Extraer Texto de PDFs (Con segmentador estructurado de textos)
+    # B. Cargar y Extraer Texto de PDFs
     for nombre_archivo, ruta in RUTAS_PDFS.items():
         try:
             if os.path.exists(ruta):
@@ -205,12 +218,12 @@ def inyectar_datos_de_respaldo(nombre_archivo):
                 "contenido": p
             })
 
-# Cargar la base de conocimiento completa
+# Cargar la base de conocimiento completa al arrancar
 cargar_base_de_conocimiento()
 
 
 # --- 4. MOTOR DE BÚSQUEDA SEMÁNTICA LOCAL CON FILTRADO DE CONTEXTO ---
-def buscar_en_pdfs(consulta, coincide_producto=False, palabras_clave_producto_query=None):
+def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None):
     """Busca en los PDFs utilizando similitud vectorial asistida por un optimizador de palabras clave."""
     if not documentos_extraidos:
         return []
@@ -229,21 +242,22 @@ def buscar_en_pdfs(consulta, coincide_producto=False, palabras_clave_producto_qu
         chunk_origen = documentos_extraidos[idx]["origen"]
         chunk_norm = normalizar_texto(chunk_content)
         
-        # FILTRO DE CONTEXTO ESTRICTO: Si el usuario busca un producto, evitamos jalar
-        # secciones de otros documentos que solo coincidan por palabras genéricas (como 'blanco')
-        # a menos que el fragmento hable explícitamente del producto en cuestión.
-        if coincide_producto and palabras_clave_producto_query:
-            contiene_producto_en_parrafo = any(p_word in chunk_norm for p_word in palabras_clave_producto_query)
-            if not contiene_producto_en_parrafo:
-                continue  # Rechaza este párrafo ajeno (ej. descarta "uniforme pantalón blanco" cuando buscas "arroz blanco")
+        # FILTRO DE CONTEXTO ULTRA-ESTRICTO:
+        # Si la búsqueda coincide con un producto del inventario, los fragmentos extraídos de PDFs
+        # DEBEN obligatoriamente poseer el sustantivo núcleo del producto (ej: 'arroz').
+        # Esto impide que adjetivos como 'integral' o 'blanco' causen emparejamientos espurios con manuales de uniforme o reglamentos.
+        if coincide_producto and sustantivos_productos:
+            contiene_sustantivo_real = any(noun in chunk_norm for noun in sustantivos_productos)
+            if not contiene_sustantivo_real:
+                continue  # Ignora este párrafo ajeno (ej: descarta "pantalón blanco" o "reestructura integral" si buscábamos arroz)
         
-        # BOOST POR PALABRAS CLAVE: Si hay coincidencia léxica exacta en consultas de alta precisión (Ej: "destinatarios")
+        # BOOST POR PALABRAS CLAVE: Si hay coincidencia léxica exacta en consultas de alta precisión
         score_final = score.item()
         
-        # Aumentar la prioridad si busca destinatarios del manual de proveedores
+        # Incrementar prioridad masivamente para consultas específicas de destinatarios
         if "destinatario" in query_norm or "destinatarios" in query_norm:
             if "destinatario" in chunk_norm or "destinatarios" in chunk_norm:
-                score_final += 0.40  # Impulso masivo al fragmento de destinatarios exacto
+                score_final += 0.45  # Impulso muy potente al fragmento exacto de destinatarios
         
         if "manual" in query_norm and "manual" in chunk_norm:
             score_final += 0.05
@@ -266,7 +280,7 @@ def buscar_en_pdfs(consulta, coincide_producto=False, palabras_clave_producto_qu
     # Ordenar por el score potenciado decrecientemente
     resultados_filtrados = sorted(resultados_filtrados, key=lambda x: x['score'], reverse=True)
     
-    # Si tenemos un resultado excelente, descartamos con más fuerza el ruido colateral
+    # Si tenemos un resultado excelente, descartamos el ruido secundario colateral
     if resultados_filtrados:
         mejor_score = resultados_filtrados[0]['score']
         if mejor_score > 0.60:
@@ -287,20 +301,23 @@ def procesar_consulta(consulta, seleccion_previa=None):
     coincidencias = []
     inventario_habilitado = not df_inventario.empty and columna_producto_real is not None
     
-    # Extraer palabras del producto para verificar intenciones cruzadas
+    query_norm = normalizar_texto(consulta_limpia)
+    palabras_query = set(query_norm.split())
+    
+    # Filtrar palabras vacías (Stop Words) de la consulta del usuario para identificar el término clave real
+    palabras_query_limpias = {w for w in palabras_query if w not in STOP_WORDS_SPANISH and len(w) > 1}
+    
+    # Extraer palabras clave de productos reales en el inventario (limpias de stop words)
     palabras_productos_en_inventario = set()
     if inventario_habilitado:
         for p in df_inventario[columna_producto_real].dropna().unique():
             norm_p = normalizar_texto(str(p))
             for w in norm_p.split():
-                if len(w) > 2 and w not in {"tipo", "con", "del", "para", "premium", "extra", "virgen", "girasol", "ledesma", "tallarin"}:
+                if len(w) > 2 and w not in STOP_WORDS_SPANISH:
                     palabras_productos_en_inventario.add(w)
 
-    query_norm = normalizar_texto(consulta_limpia)
-    palabras_query = set(query_norm.split())
-    
-    # Identificar si la consulta menciona productos de nuestra base de datos
-    palabras_clave_producto_query = palabras_query.intersection(palabras_productos_en_inventario)
+    # Identificar si la consulta menciona productos reales eliminando conectores vacíos
+    palabras_clave_producto_query = palabras_query_limpias.intersection(palabras_productos_en_inventario)
     coincide_producto = len(palabras_clave_producto_query) > 0
     
     # Palabras clave del manual/reglamentos para desambiguar
@@ -314,10 +331,11 @@ def procesar_consulta(consulta, seleccion_previa=None):
     }
     coincide_manual_politicas = len(palabras_query.intersection(palabras_manual_politicas)) > 0
     
-    # Si es puramente manuales, desactivamos la coincidencia fortuita de inventario
-    if coincide_manual_politicas and not any(p in {"arroz", "aceite", "azucar", "fideos"} for p in palabras_query):
+    # Desactivar coincidencias fortuitas si se pregunta explícitamente por manuales sin mencionar un producto
+    if coincide_manual_politicas and not any(p in {"arroz", "aceite", "azucar", "fideos", "tallarin"} for p in palabras_query_limpias):
         coincide_producto = False
 
+    # Realizar el emparejamiento con el inventario utilizando términos estrictamente limpios de stop words
     if inventario_habilitado and (coincide_producto or not coincide_manual_politicas):
         productos_disponibles = df_inventario[columna_producto_real].astype(str).tolist()
         
@@ -325,14 +343,15 @@ def procesar_consulta(consulta, seleccion_previa=None):
             p_lower = p.lower()
             p_norm = normalizar_texto(p)
             tokens_p_norm = set(p_norm.split())
+            tokens_p_norm_limpios = {t for t in tokens_p_norm if t not in STOP_WORDS_SPANISH}
             
-            # Coincidencia directa o parcial
+            # Coincidencia directa exacta de subcadena o cruce léxico limpio de stop words
             if p_lower in consulta_limpia:
                 coincidencias.append(p)
-            elif len(palabras_query.intersection(tokens_p_norm)) > 0:
+            elif palabras_query_limpias.intersection(tokens_p_norm_limpios):
                 coincidencias.append(p)
                 
-    # AGRUPACIÓN: Asegurar que el menú muestre descripciones únicas
+    # AGRUPACIÓN: Asegurar que el menú muestre nombres de productos únicos
     coincidencias = list(dict.fromkeys(coincidencias))
     
     # Si hay múltiples productos parecidos (Ej. "Arroz tipo 1", "Arroz tipo 2")
@@ -343,7 +362,7 @@ def procesar_consulta(consulta, seleccion_previa=None):
             "html": f"<p style='color: #d35400; font-weight: bold; font-family: sans-serif;'>🔍 Encontramos varias opciones de productos para '{consulta}'. Por favor, elija una de la lista:</p>"
         }
     
-    # Obtener el registro del inventario (Traer todas las darsenas, depósitos o precios que coincidan)
+    # Obtener el registro del inventario
     resultado_inv = pd.DataFrame()
     if len(coincidencias) == 1:
         resultado_inv = df_inventario[df_inventario[columna_producto_real] == coincidencias[0]]
@@ -393,11 +412,21 @@ def procesar_consulta(consulta, seleccion_previa=None):
         </div>
         """
 
-    # Búsqueda semántica protegida en PDFs
+    # Extraer el sustantivo principal (el núcleo del sujeto del producto) para el filtro estricto de PDFs
+    sustantivos_productos_coincidentes = set()
+    for p in coincidencias:
+        palabras_p = normalizar_texto(p).split()
+        if palabras_p:
+            # El primer término suele ser el sustantivo principal (ej: 'arroz', 'aceite', 'azucar')
+            primer_termino = palabras_p[0]
+            if primer_termino not in STOP_WORDS_SPANISH:
+                sustantivos_productos_coincidentes.add(primer_termino)
+
+    # Búsqueda semántica protegida en PDFs enviando el sustantivo núcleo como filtro
     resultados_pdf = buscar_en_pdfs(
         consulta, 
         coincide_producto=coincide_producto, 
-        palabras_clave_producto_query=palabras_clave_producto_query
+        sustantivos_productos=sustantivos_productos_coincidentes
     )
     
     html_pdfs = ""
