@@ -309,7 +309,18 @@ def procesar_consulta(consulta):
     coincidencias = []
     inventario_habilitado = not df_inventario.empty and columna_producto_real is not None
     
-    if inventario_habilitado and palabras_clave:
+    # 1. Comprobación de coincidencia exacta primero (evita bucles infinitos en selectores múltiples)
+    es_match_exacto = False
+    if inventario_habilitado:
+        productos_disponibles = df_inventario[columna_producto_real].astype(str).tolist()
+        for p in productos_disponibles:
+            if p.lower() == consulta_limpia:
+                coincidencias = [p]
+                es_match_exacto = True
+                break
+                
+    # 2. Búsqueda por palabras clave solo si no hay una coincidencia exacta directa
+    if not es_match_exacto and inventario_habilitado and palabras_clave:
         productos_disponibles = df_inventario[columna_producto_real].astype(str).tolist()
         
         # Filtramos palabras clave de longitud menor o igual a 1 para evitar falsos positivos con letras individuales
