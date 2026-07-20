@@ -162,7 +162,7 @@ def inyectar_datos_de_respaldo(nombre_archivo):
         ],
         "Manual_Proveedores-Politicas_Compra.pdf": [
             "1.3 Objetivo del Manual y a Quién Va Dirigido, subsección: Destinatarios. El contenido de este manual de compras es de cumplimiento obligatorio para: \n• Proveedores actuales de Mercado Central 24h en México y en todos los países donde la empresa opera. \n• Candidatos a nuevos proveedores que deseen integrarse a nuestra base de suministro. \n• Personal interno del área de Compras, Almacén, Calidad y Finanzas que interactúa con proveedores. \n• Auditores internos y externos que revisen los procesos de abastecimiento.",
-            "La recepción de mercadería y control de calidad se realiza exclusivamente de lunes a sábados en la dársena de cargas número 3, en el rango de 06:00 a 12:00 hs. Se requiere solicitar turno previamente en el portal oficial de compras."
+            "La recepción de mercadería y control de calidad se realiza exclusivamente de lunes a sábados en la dársea de cargas número 3, en el rango de 06:00 a 12:00 hs. Se requiere solicitar turno previamente en el portal oficial de compras."
         ],
         "Politica de ATC.pdf": [
             "Para el año 2024, Mercado Central 24h opera con más de 85 sucursales entre México y Latinoamérica... 1.2 Misión Ofrecer a nuestras familias latinoamericanas una experiencia de compra de alta calidad... 1.3 Visión Ser la cadena de supermercados de mayor confianza...",
@@ -280,14 +280,31 @@ def procesar_consulta(consulta):
     global columna_producto_real
     consulta_limpia = consulta.strip().lower()
     
+    # Ampliamos la lista de stop words para evitar falsos positivos con preposiciones o conectores de una letra como "a"
     stop_words = {
         "y", "sus", "de", "con", "la", "el", "los", "las", "un", "una", "unos", "unas", 
         "para", "por", "en", "sobre", "del", "al", "que", "es", "son", "cuál", "cual", "cuales", "cuáles",
-        "ver", "buscar", "precio", "precios", "stock", "inventario", "mostrar", "qué", "que"
+        "ver", "buscar", "precio", "precios", "stock", "inventario", "mostrar", "qué", "que",
+        "a", "o", "u", "e", "este", "esta", "estos", "estas", "ese", "esa", "esos", "esas",
+        "aquello", "aquella", "como", "cómo", "dónde", "donde", "cuando", "cuándo", "quién", "quien",
+        "nosotros", "ellos", "usted", "ustedes", "mi", "mis", "tu", "tus", "su", "sus"
+    }
+    
+    # Palabras clave orientadas exclusivamente a políticas, manuales u organización
+    palabras_corporativas = {
+        "valor", "valores", "misión", "mision", "visión", "vision", "política", "politica", 
+        "políticas", "politicas", "manual", "reglamento", "procedimiento", "procedimientos", 
+        "atc", "atención", "atencion", "cliente", "clientes", "proveedor", "proveedores", 
+        "compra", "compras", "horario", "horarios", "estacionamiento", "estacionamientos",
+        "sanción", "sanciones", "falta", "faltas", "medida", "medidas", "disciplinaria", "disciplinarias",
+        "faq", "faqs", "pregunta", "preguntas"
     }
     
     tokens = [t for t in re.split(r'\W+', consulta_limpia) if t]
     palabras_clave = [t for t in tokens if t not in stop_words]
+    
+    # Determinamos si la consulta se refiere a políticas de la organización
+    contiene_tema_corporativo = any(pc in palabras_corporativas for pc in palabras_clave)
     
     coincidencias = []
     inventario_habilitado = not df_inventario.empty and columna_producto_real is not None
@@ -295,10 +312,32 @@ def procesar_consulta(consulta):
     if inventario_habilitado and palabras_clave:
         productos_disponibles = df_inventario[columna_producto_real].astype(str).tolist()
         
+        # Filtramos palabras clave de longitud menor o igual a 1 para evitar falsos positivos con letras individuales
+        palabras_clave_filtradas = [pc for pc in palabras_clave if len(pc) > 1]
+        
         for p in productos_disponibles:
             p_lower = p.lower()
-            if any(pc in p_lower for pc in palabras_clave):
-                coincidencias.append(p)
+            palabras_producto = re.split(r'\W+', p_lower)
+            
+            if contiene_tema_corporativo:
+                # Si la pregunta se refiere a temas corporativos (ej. valores, clientes, políticas),
+                # NO permitimos que palabras del vocabulario corporativo gatillen coincidencia con el inventario.
+                # Solamente buscaríamos coincidencias si hay una palabra de producto explícita y su coincidencia es exacta.
+                match_exacto = False
+                for pc in palabras_clave_filtradas:
+                    if pc in palabras_corporativas:
+                        continue  # Se omite 'valores', 'clientes', etc., en la búsqueda de productos
+                    if pc in palabras_producto:
+                        match_exacto = True
+                        break
+                if match_exacto:
+                    coincidencias.append(p)
+            else:
+                # Búsqueda de inventario estándar utilizando límites de palabras (evita substring parcial erróneo)
+                for pc in palabras_clave_filtradas:
+                    if any(pc == pp or pp.startswith(pc) for pp in palabras_producto if len(pp) >= len(pc)):
+                        coincidencias.append(p)
+                        break
                 
     coincidencias_agrupadas = sorted(list(set(coincidencias)))
     
@@ -505,4 +544,3 @@ if __name__ == "__main__":
         server_port=7860,
         theme=warm_theme
     )
-eof
