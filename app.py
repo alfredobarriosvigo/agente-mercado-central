@@ -123,21 +123,21 @@ def inyectar_datos_de_respaldo(nombre_archivo):
     """Inyecta textos de consulta real si los PDFs físicos se encuentran vacíos o son ilegibles."""
     respaldo = {
         "FAQ.pdf": [
-            "¿Cuáles son los horarios de atención al público general del Mercado Central? El mercado opera las 24 horas del día, los 365 días del año de forma ininterrumpida. Las oficinas de facturación y administración atienden de lunes a viernes de 08:00 a 17:00 hs.",
-            "¿El estacionamiento tiene costo dentro del predio? El ingreso y estacionamiento de vehículos particulares livianos es completamente gratuito durante las primeras 2 horas. Los transportistas de gran porte para carga y descarga abonan una tarifa fija reglamentada en la cabina del portón de entrada."
+            "Horarios de atención: El mercado opera las 24 horas del día, los 365 días del año. Las oficinas administrativas atienden de lunes a viernes de 08:00 a 17:00 hs.",
+            "Estacionamiento: El ingreso es gratuito las primeras 2 horas para vehículos particulares. Los transportistas de gran porte abonan tarifa fija reglamentada."
         ],
         "Manual_Proveedores-Politicas_Compra.pdf": [
-            "Los destinatarios de este manual de proveedores y políticas de compra abarcan a todos los abastecedores, productores directos, intermediarios comerciales y contratistas externos de insumos que deseen entablar operaciones comerciales con el Mercado Central.",
-            "Los plazos de pago estándar para proveedores de productos secos y frescos están fijados para los días viernes de cada semana, con una acreditación estimada a los 30 días corridos posteriores a la recepción de la factura comercial debidamente aprobada.",
-            "La recepción de mercadería y control de calidad se realiza exclusivamente de lunes a sábados en la dársena de cargas número 3, en el rango horario de 06:00 a 12:00 hs. Se requiere solicitar turno previamente en el portal oficial de compras."
+            "Destinatarios del Manual de Proveedores:\n• Proveedores actuales de Mercado Central 24h en México y en todos los países donde la empresa opera.\n• Candidatos a nuevos proveedores que deseen integrarse a nuestra base de suministro.\n• Personal interno del área de Compras, Almacén, Calidad y Finanzas que interactúa con proveedores.\n• Auditores internos y externos que revisen los procesos de abastecimiento.",
+            "Plazos de pago: Los pagos estándar están fijados para los días viernes de cada semana, con una acreditación estimada a los 30 días corridos post-factura.",
+            "Recepción de mercadería: Se realiza de lunes a sábados en la dársena de cargas número 3, de 06:00 a 12:00 hs. Se requiere turno previo."
         ],
         "Politica de ATC.pdf": [
-            "La política de atención al cliente (ATC) del Mercado Central determina que cualquier solicitud de cambio o devolución de productos defectuosos de fábrica debe gestionarse dentro de las primeras 24 horas posteriores a la compra, presentando el ticket físico original.",
-            "Los medios de pago autorizados en los puntos de venta habilitados incluyen efectivo en moneda de curso legal (guaraníes), tarjetas de crédito y débito de procesadoras autorizadas, y pagos unificados por código QR bancario."
+            "Política de devoluciones: Cualquier solicitud de cambio por defecto debe gestionarse dentro de las primeras 24 horas tras la compra, presentando el ticket original.",
+            "Medios de pago: Efectivo (guaraníes), tarjetas de crédito/débito y pagos unificados por código QR bancario."
         ],
         "Reglamento_Interno-Proc_Operativos.pdf": [
-            "Es una directiva obligatoria para todo el personal operativo de piso presentarse a su jornada laboral vistiendo el uniforme reglamentario completo, calzado de seguridad con puntera reforzada y portar en el pecho la credencial de identidad visible.",
-            "Procedimiento preventivo para góndolas: Cada encargado de pasillo debe realizar la limpieza, ordenamiento físico y sanitización de las góndolas asignadas al inicio y al cierre de cada de sus turnos operativos."
+            "Uniforme: Es obligatorio el uso de uniforme reglamentario completo, calzado de seguridad con puntera reforzada y credencial de identidad visible.",
+            "Limpieza de góndolas: Cada encargado debe realizar la limpieza, ordenamiento y sanitización al inicio y al cierre de cada turno."
         ]
     }
     if nombre_archivo in respaldo:
@@ -152,7 +152,30 @@ cargar_base_de_conocimiento()
 
 
 # --- 4. MOTOR DE BÚSQUEDA SEMÁNTICA LOCAL (Hugging Face) ---
-def buscar_en_pdfs(consulta, umbral=0.32):
+def buscar_en_pdfs(consulta, umbral=0.45):
+    """Busca coincidencias con un umbral más estricto para mayor precisión."""
+    if not documentos_extraidos:
+        return []
+        
+    textos_a_comparar = [doc["contenido"] for doc in documentos_extraidos]
+    
+    query_emb = model.encode(consulta, convert_to_tensor=True)
+    doc_embs = model.encode(textos_a_comparar, convert_to_tensor=True)
+    cosine_scores = util.cos_sim(query_emb, doc_embs)[0]
+    
+    resultados_filtrados = []
+    for idx, score in enumerate(cosine_scores):
+        if score.item() > umbral:
+            resultados_filtrados.append({
+                "Origen": documentos_extraidos[idx]["origen"],
+                "Contenido": documentos_extraidos[idx]["contenido"],
+                "score": score.item()
+            })
+            
+    # Ordenar y limitar a 1 o 2 resultados si la coincidencia es muy alta
+    resultados_filtrados = sorted(resultados_filtrados, key=lambda x: x['score'], reverse=True)
+    return resultados_filtrados[:2] 
+
     """Busca coincidencias en los documentos PDF con un umbral de relevancia dinámico."""
     if not documentos_extraidos:
         return []
