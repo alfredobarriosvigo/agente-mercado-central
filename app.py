@@ -272,31 +272,25 @@ def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None
     query_norm = normalizar_texto(consulta)
     
     for idx, score in enumerate(cosine_scores):
+        score_final = float(score.item())  # Inicialización segura
         chunk_content = documentos_extraidos[idx]["contenido"]
         chunk_origen = documentos_extraidos[idx]["origen"]
         chunk_norm = normalizar_texto(chunk_content)
         
-        # FILTRO DE CONTEXTO ULTRA-ESTRICTO:
-        # Si la búsqueda coincide con un producto del inventario, los fragmentos extraídos de PDFs
-        # DEBEN obligatoriamente poseer el sustantivo núcleo del producto (ej: 'arroz').
-        # Esto impide que adjetivos como 'integral' o 'blanco' causen emparejamientos espurios con manuales de uniforme o reglamentos.
+        # FILTRO DE CONTEXTO ULTRA-ESTRICTO
         if coincide_producto and sustantivos_productos:
             contiene_sustantivo_real = any(noun in chunk_norm for noun in sustantivos_productos)
             if not contiene_sustantivo_real:
-                continue  # Ignora este párrafo ajeno (ej: descarta "pantalón blanco" si buscábamos arroz)
+                continue
         
-        # BOOST POR PALABRAS CLAVE: Si hay coincidencia léxica exacta en consultas de alta precisión
-        # Incrementar prioridad masivamente para consultas de destinatarios
+        # BOOST POR PALABRAS CLAVE
         if "destinatario" in query_norm or "destinatarios" in query_norm:
             if "destinatario" in chunk_norm or "destinatarios" in chunk_norm:
-                score_final += 0.45  # Impulso muy potente al fragmento exacto de destinatarios
+                score_final += 0.45
         
-        # Incrementar prioridad masivamente para consultas de valores organizacionales
         if "valor" in query_norm or "valores" in query_norm:
-            # Se restringe el boost para que aplique únicamente a los valores corporativos y éticos,
-            # evitando falsos positivos con "valores" entendido como dinero o activos financieros (robo).
             if "valores orientados" in chunk_norm or "valores organizacionales" in chunk_norm or ("valores" in chunk_norm and ("honestidad" in chunk_norm or "calidez" in chunk_norm)):
-                score_final += 0.45  # Impulso muy potente al fragmento exacto de valores corporativos
+                score_final += 0.45
 
         if "manual" in query_norm and "manual" in chunk_norm:
             score_final += 0.05
@@ -316,10 +310,9 @@ def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None
                 "score": score_final
             })
             
-    # Ordenar por el score potenciado decrecientemente
+    # Ordenar y filtrar ruido
     resultados_filtrados = sorted(resultados_filtrados, key=lambda x: x['score'], reverse=True)
     
-    # Si tenemos un resultado excelente, descartamos el ruido secundario colateral
     if resultados_filtrados:
         mejor_score = resultados_filtrados[0]['score']
         if mejor_score > 0.60:
