@@ -108,7 +108,8 @@ def chunkear_texto_inteligente(texto):
         else:
             # Si la línea anterior NO terminaba en un signo de puntuación fuerte y es lo bastante larga,
             # significa que el texto simplemente continuó abajo por el ancho del PDF. ¡Las unimos!
-            termina_oracion = anterior.endswith(('.', ':', '?', '!', '"', '”'))
+            # MODIFICACIÓN: No tratamos los dos puntos (:) como fin de oración si la línea es muy corta (ej: "Misión:")
+            termina_oracion = anterior.endswith(('.', '?', '!', '"', '”')) or (anterior.endswith(':') and len(anterior) > 60)
             if not termina_oracion and len(anterior) > 15:
                 lineas_unidas[-1] = anterior + " " + linea
             else:
@@ -137,7 +138,7 @@ def chunkear_texto_inteligente(texto):
     if current_chunk:
         chunks.append("\n".join(current_chunk))
     
-    # Fusionar inteligentemente títulos cortos con sus listas estructuradas subsecuentes
+    # Fusionar inteligentemente títulos cortos con sus bloques de texto subsiguientes
     merged_chunks = []
     i = 0
     while i < len(chunks):
@@ -152,7 +153,9 @@ def chunkear_texto_inteligente(texto):
                 "\n•" in siguiente or 
                 "\n-" in siguiente
             )
-            if len(chunk) < 200 and tiene_vinetas:
+            # MODIFICACIÓN: Si el bloque actual es muy corto (ej. "Misión:" o títulos menores de 120 caracteres)
+            # o si el siguiente bloque posee viñetas estructuradas, los fusionamos para mantener el contexto
+            if len(chunk) < 120 or (len(chunk) < 200 and tiene_vinetas):
                 merged_chunks.append(chunk + "\n" + siguiente)
                 i += 2
                 continue
