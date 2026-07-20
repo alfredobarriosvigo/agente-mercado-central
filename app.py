@@ -5,7 +5,6 @@ import gradio as gr
 from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer, util
 
-# --- 1. CONFIGURACIÓN DE RUTAS ---
 CARPETA_DATOS = "datos"
 RUTA_INVENTARIO = os.path.join(CARPETA_DATOS, "Inventario.xlsx")
 RUTAS_PDFS = {
@@ -18,10 +17,8 @@ RUTAS_PDFS = {
 os.makedirs(CARPETA_DATOS, exist_ok=True)
 
 
-# --- 2. GENERACIÓN DE ARCHIVOS DEMO (Por si la carpeta se encuentra vacía) ---
 def crear_archivos_demo():
     """Genera archivos de prueba en la carpeta 'datos' para asegurar un primer arranque sin errores."""
-    # Crear Inventario.xlsx de ejemplo
     if not os.path.exists(RUTA_INVENTARIO):
         df_inv = pd.DataFrame({
             "Producto": [
@@ -36,7 +33,6 @@ def crear_archivos_demo():
         df_inv.to_excel(RUTA_INVENTARIO, index=False)
         print("✓ Creado archivo demo: Inventario.xlsx")
 
-    # Crear marcadores de posición temporales para los archivos PDF
     for nombre_pdf, ruta in RUTAS_PDFS.items():
         if not os.path.exists(ruta):
             with open(ruta, "wb") as f:
@@ -46,19 +42,10 @@ def crear_archivos_demo():
 crear_archivos_demo()
 
 
-# --- 3. LECTURA Y PROCESAMIENTO INTELIGENTE DE ARCHIVOS ---
-print("Cargando modelo de lenguaje local para similitud semántica...")
-model = SentenceTransformer('all-MiniLM-L6-v2')
-
-df_inventario = pd.DataFrame()
-documentos_extraidos = []
-columna_producto_real = None  # Almacena el nombre dinámico de la columna de productos encontrada
-
-
 def chunkear_texto_inteligente(texto):
     """
     Analiza el texto de un PDF línea por línea y agrupa lógicamente párrafos completos,
-    listas con viñetas y títulos cortos que terminan en dos puntos para no perder el contexto.
+    listas con viñetas y títulos cortos de sección, manteniendo la jerarquía de los manuales.
     """
     lineas = [l.strip() for l in texto.split("\n")]
     parrafos = []
@@ -68,23 +55,34 @@ def chunkear_texto_inteligente(texto):
         if not linea:
             continue
         
-        # Identificar si la línea es un elemento de lista (viñeta)
-        es_vineta = linea.startswith(('•', '-', '*', '1.', '2.', '3.', '4.', '5.'))
+        # Identificar si es una viñeta simple (ej: "•", "-" o numeración como "1. ")
+        # El regex evita capturar secciones decimales como "1.4" o "2.2"
+        es_vineta = linea.startswith(('•', '-', '*')) or bool(re.match(r'^\d+\.\s', linea))
         
-        # Identificar si la línea anterior terminó con dos puntos (:) o si es una viñeta consecutiva
+        # Identificar si es un encabezado numerado de sección o subsección (ej: "1.4", "2.2.1")
+        es_seccion = bool(re.match(r'^\d+\.\d+', linea))
+        
+        if es_seccion:
+            # Si encontramos una sección, forzamos el cierre del párrafo actual y abrimos uno nuevo
+            if parrafo_actual:
+                parrafos.append(" ".join(parrafo_actual))
+            parrafo_actual = [linea]
+            continue
+            
+        # Identificar si la línea anterior terminó con dos puntos (:) o es una viñeta consecutiva
         debe_fusionar = es_vineta or (parrafo_actual and parrafo_actual[-1].endswith(':'))
         
         if debe_fusionar:
             parrafo_actual.append(linea)
-        elif len(linea) < 90 and linea.endswith(':'):
-            # Es un encabezado o subsección corta (ej: "Misión:")
+        elif len(linea) < 90 and (linea.endswith(':') or linea.endswith('Misión') or linea.endswith('Visión') or linea.endswith('Valores')):
+            # Encabezado corto sin numeración
             if parrafo_actual:
                 parrafos.append(" ".join(parrafo_actual))
             parrafo_actual = [linea]
         else:
             if parrafo_actual:
-                # Comprobación de líneas rotas (word-wrap) que no terminan en signo de puntuación
                 linea_previa = parrafo_actual[-1]
+                # Comprobación de líneas rotas por formato del PDF
                 if not linea_previa.endswith(('.', ':', ';', '!', '?')):
                     parrafo_actual.append(linea)
                 else:
@@ -96,16 +94,24 @@ def chunkear_texto_inteligente(texto):
     if parrafo_actual:
         parrafos.append(" ".join(parrafo_actual))
         
-    # Limpieza final de fragmentos y unión de espaciados dobles
+    # Limpieza final de fragmentos y unión de espaciados múltiples
     resultados = []
     for p in parrafos:
         limpio = p.strip()
         while "  " in limpio:
             limpio = limpio.replace("  ", " ")
-        if len(limpio) > 30:  # Evita guardar fragmentos demasiado vacíos o irrelevantes
+        if len(limpio) > 30:  # Evita guardar fragmentos vacíos o irrelevantes
             resultados.append(limpio)
             
     return resultados
+
+
+print("Cargando modelo de lenguaje local para similitud semántica...")
+model = SentenceTransformer('all-MiniLM-L6-v2')
+
+df_inventario = pd.DataFrame()
+documentos_extraidos = []
+columna_producto_real = None
 
 
 def cargar_base_de_conocimiento():
@@ -113,22 +119,18 @@ def cargar_base_de_conocimiento():
     documentos_extraidos = []
     columna_producto_real = None
     
-    # A. Cargar Inventario.xlsx con detección flexible de columnas (Previene KeyError)
+    # A. Cargar Inventario.xlsx con detección flexible de columnas
     try:
         if os.path.exists(RUTA_INVENTARIO):
             df_temp = pd.read_excel(RUTA_INVENTARIO)
-            
-            # Limpiar nombres de columnas (eliminar espacios en blanco alrededor de los títulos)
             df_temp.columns = [str(c).strip() for c in df_temp.columns]
             
-            # Mapeo de búsqueda inteligente para la columna de productos
             posibles_nombres = ["producto", "productos", "artículo", "articulo", "artículos", "articulos", "descripción", "descripcion", "nombre"]
             for col in df_temp.columns:
                 if col.lower() in posibles_nombres:
                     columna_producto_real = col
                     break
             
-            # Fallback secundario si no hubo coincidencia exacta
             if not columna_producto_real:
                 for col in df_temp.columns:
                     if "prod" in col.lower() or "art" in col.lower():
@@ -140,7 +142,7 @@ def cargar_base_de_conocimiento():
                 print(f"✓ Inventario.xlsx cargado correctamente. Columna identificada: '{columna_producto_real}'")
             else:
                 df_inventario = df_temp
-                print(f"⚠ Alerta: Se cargó el Excel, pero no se encontró una columna válida de productos.")
+                print(f"⚠ Alerta: Se cargó el Excel sin encontrar columna válida de productos.")
                 
     except Exception as e:
         print(f"Error al cargar Inventario.xlsx: {e}")
@@ -158,7 +160,6 @@ def cargar_base_de_conocimiento():
                     if texto_pagina:
                         texto_archivo += texto_pagina + "\n"
                 
-                # Validar si el PDF contiene texto útil legible o es un marcador temporal vacío
                 if len(texto_archivo.strip()) > 50:
                     chunks = chunkear_texto_inteligente(texto_archivo)
                     for c in chunks:
@@ -170,7 +171,7 @@ def cargar_base_de_conocimiento():
                     inyectar_datos_de_respaldo(nombre_archivo)
                     
         except Exception as e:
-            print(f"Error leyendo PDF {nombre_archivo} ({e}). Usando datos de respaldo predefinidos.")
+            print(f"Error leyendo PDF {nombre_archivo} ({e}). Usando datos de respaldo.")
             inyectar_datos_de_respaldo(nombre_archivo)
 
 
@@ -208,11 +209,9 @@ def inyectar_datos_de_respaldo(nombre_archivo):
                 "contenido": p
             })
 
-# Ejecutar carga al iniciar el servidor
 cargar_base_de_conocimiento()
 
 
-# --- 4. MOTOR DE BÚSQUEDA SEMÁNTICA LOCAL (Hugging Face con Boost Avanzado) ---
 STOP_WORDS = {
     "y", "sus", "de", "del", "el", "la", "los", "las", "un", "una", "en", "para", "con", "por", "sobre", "a",
     "que", "qué", "cuál", "cuales", "cuáles", "quién", "quiénes", "como", "cómo", "dónde", "cuando", "cuándo",
@@ -220,30 +219,21 @@ STOP_WORDS = {
     "mostrar", "obtener", "dame", "información", "informacion", "detalle", "detalles", "asociados", "asociado"
 }
 
+
 def normalizar_texto(texto):
-    """Limpia caracteres especiales, acentos y convierte el texto a minúsculas."""
     texto = texto.lower()
-    replacements = {
-        "á": "a", "é": "e", "í": "i", "ó": "o", "ú": "u",
-        "ü": "u", "ñ": "n"
-    }
+    replacements = {"á": "a", "é": "e", "í": "i", "ó": "o", "ú": "u", "ü": "u", "ñ": "n"}
     for orig, rep in replacements.items():
         texto = texto.replace(orig, rep)
-    # Reemplazar caracteres no alfanuméricos por espacios
     texto = re.sub(r'[^a-z0-9\s•\-\*]', ' ', texto)
     return " ".join(texto.split())
 
 
 def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None):
-    """
-    Busca coincidencias semánticas en PDFs utilizando SentenceTransformers,
-    aplicando un sistema híbrido de impulsos léxicos contextuales para evitar falsos positivos.
-    """
     if not documentos_extraidos:
         return []
         
     textos_a_comparar = [doc["contenido"] for doc in documentos_extraidos]
-    
     query_emb = model.encode(consulta, convert_to_tensor=True)
     doc_embs = model.encode(textos_a_comparar, convert_to_tensor=True)
     cosine_scores = util.cos_sim(query_emb, doc_embs)[0]
@@ -251,15 +241,15 @@ def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None
     query_norm = normalizar_texto(consulta)
     resultados_filtrados = []
     
-    # Determinar el umbral base adaptativo
+    # Adaptar umbral de base según tipo de búsqueda
     umbral_base = 0.45 if coincide_producto else 0.32
     
     for idx, score in enumerate(cosine_scores):
         score_final = float(score.item())
         chunk_norm = normalizar_texto(documentos_extraidos[idx]["contenido"])
+        origen_norm = documentos_extraidos[idx]["origen"].lower()
         
-        # A. FILTRO DE CONTEXTO ESTRICTO (Para búsquedas de inventario)
-        # Evita que se traiga información no relacionada (Ej: Reglamento de uniforme "pantalón blanco" si buscas "arroz blanco")
+        # A. FILTRO DE CONTEXTO DE PRODUCTO (Evita cruces con manuales ajenos)
         if coincide_producto and sustantivos_productos:
             contiene_algun_sustantivo = False
             for sust in sustantivos_productos:
@@ -267,32 +257,36 @@ def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None
                     contiene_algun_sustantivo = True
                     break
             if not contiene_algun_sustantivo:
-                # El término del inventario no está explícitamente en este chunk de PDF, se invalida
                 continue
 
-        # B. BOOST POR PALABRAS CLAVE CRÍTICAS (Evita cruzamientos cruzados de contexto)
+        # B. BOOST SEMÁNTICO DE PRECISIÓN (Evita falsos positivos cruzados)
         
         # 1. Destinatarios
         if "destinatario" in query_norm or "destinatarios" in query_norm:
             if "destinatario" in chunk_norm or "destinatarios" in chunk_norm:
                 score_final += 0.45
             else:
-                score_final -= 0.20  # Penalizar chunks que no hablen de destinatarios si se pregunta explícitamente
+                score_final -= 0.20
 
-        # 2. Valores orientados al cliente vs Valores corporativos generales
+        # 2. Valores Orientados a Clientes vs Valores Corporativos Generales / Medidas Disciplinarias
         if "valor" in query_norm or "valores" in query_norm:
             if "cliente" in query_norm or "clientes" in query_norm:
-                # Si busca valores para clientes, solo potenciamos los que tengan menciones de cliente o ATC
-                if "valores orientados" in chunk_norm or ("valores" in chunk_norm and ("cliente" in chunk_norm or "atc" in chunk_norm)):
-                    score_final += 0.45
+                # Es una búsqueda específica sobre la política de ATC
+                es_valores_cliente_atc = ("valores orientados" in chunk_norm or 
+                                          "valores de servicio" in chunk_norm or 
+                                          ("valores" in chunk_norm and ("atencion al cliente" in chunk_norm or "atc" in chunk_norm or "atc" in origen_norm)))
+                
+                # Descartar falsos positivos de sanciones del reglamento (como robo de valores, agresión a clientes)
+                if es_valores_cliente_atc and "sancion" not in chunk_norm and "robo" not in chunk_norm:
+                    score_final += 0.50
                 else:
-                    score_final -= 0.25  # Descenso drástico a valores de reglamento financiero o laboral
+                    score_final -= 0.35  # Penalización agresiva para descartar ruido del reglamento interno
             else:
-                # Si es una búsqueda corporativa general
+                # Valores corporativos de misión
                 if "valores corporativos" in chunk_norm or ("valores" in chunk_norm and "organizacionales" in chunk_norm):
                     score_final += 0.45
 
-        # 3. Misión de la empresa
+        # 3. Misión Corporativa
         if "mision" in query_norm or "misión" in query_norm:
             if "mision" in chunk_norm or "misión" in chunk_norm:
                 score_final += 0.45
@@ -307,11 +301,9 @@ def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None
                 "score": score_final
             })
             
-    # Ordenar las respuestas por relevancia decreciente
     resultados_filtrados = sorted(resultados_filtrados, key=lambda x: x['score'], reverse=True)
     
-    # D. DESCARTE DINÁMICO DE RUIDO SECUNDARIO (Relative Score Thresholding)
-    # Si hay una respuesta altamente acertada (ej. score > 0.65), descarta las que sean muy inferiores
+    # D. DESCARTE DE RUIDO SECUNDARIO (Relative Score Thresholding)
     if resultados_filtrados:
         max_score = resultados_filtrados[0]['score']
         if max_score > 0.65:
@@ -320,15 +312,12 @@ def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None
     return resultados_filtrados[:3]
 
 
-# --- 5. LÓGICA DE PROCESAMIENTO Y RESPUESTAS (Planillas Dinámicas HTML) ---
 def procesar_consulta(consulta, seleccion_previa=None):
     global columna_producto_real
     if seleccion_previa:
         consulta = seleccion_previa
 
     consulta_norm = normalizar_texto(consulta)
-    
-    # Filtrado estricto de Stop-Words para encontrar las verdaderas palabras clave de inventario
     palabras_consulta = [p for p in consulta_norm.split() if p not in STOP_WORDS]
     
     coincidencias_completas = []
@@ -338,27 +327,19 @@ def procesar_consulta(consulta, seleccion_previa=None):
     inventario_habilitado = not df_inventario.empty and columna_producto_real is not None
     
     if inventario_habilitado and palabras_consulta:
-        # Extraer listado de productos de la base de datos
         productos_disponibles = df_inventario[columna_producto_real].astype(str).tolist()
-        
-        # Buscar coincidencias: si alguna palabra clave de la consulta está en la descripción del producto
         for prod in productos_disponibles:
             prod_norm = normalizar_texto(prod)
             palabras_prod = prod_norm.split()
             
-            # Comprobar si hay intersección de palabras clave
             interseccion = set(palabras_consulta).intersection(set(palabras_prod))
             if interseccion:
                 coincidencias_completas.append(prod)
                 coincide_producto = True
-                # Guardar el sustantivo principal (primera palabra, ej: "Arroz") para el filtro cruzado de PDFs
                 sustantivos_productos_coincidentes.add(palabras_prod[0])
 
-    # Agrupación y unicidad de opciones sugeridas para el selector dinámico
-    # Esto asegura que "Arroz tipo 1" salga solo una vez en la lista aunque esté en múltiples ubicaciones
     opciones_unicas = sorted(list(set(coincidencias_completas)))
     
-    # Menú dinámico de aproximación lógica si se encuentran varios productos coincidentes
     if len(opciones_unicas) > 1 and not any(p.lower() == consulta_norm for p in opciones_unicas):
         return {
             "tipo": "multiples_opciones",
@@ -366,14 +347,12 @@ def procesar_consulta(consulta, seleccion_previa=None):
             "html": f"<p style='color: #d35400; font-weight: bold; font-family: sans-serif; margin-bottom: 8px;'>🔍 Encontramos varias opciones de productos para tu consulta. Por favor, selecciona una de la lista de la derecha para ver sus detalles:</p>"
         }
     
-    # Obtener los registros del inventario vinculados a la búsqueda
     resultado_inv = pd.DataFrame()
     if len(opciones_unicas) == 1:
         resultado_inv = df_inventario[df_inventario[columna_producto_real] == opciones_unicas[0]]
     elif inventario_habilitado and any(p.lower() == consulta_norm for p in df_inventario[columna_producto_real].astype(str).str.lower().tolist()):
         resultado_inv = df_inventario[df_inventario[columna_producto_real].astype(str).str.lower() == consulta_norm]
 
-    # Armar planilla HTML de Inventario de forma dinámica
     html_inventario = ""
     if not resultado_inv.empty:
         html_inventario = f"""
@@ -383,7 +362,6 @@ def procesar_consulta(consulta, seleccion_previa=None):
                 <thead>
                     <tr style="background-color: #34495e; color: white;">
         """
-        # Cabeceras con forzado estricto de color blanco para contraste completo
         for col in resultado_inv.columns:
             html_inventario += f'<th style="padding: 12px 10px; border: 1px solid #ddd; color: white !important; font-weight: bold; text-shadow: 0 1px 1px rgba(0,0,0,0.2);">{col}</th>'
             
@@ -392,18 +370,15 @@ def procesar_consulta(consulta, seleccion_previa=None):
                 </thead>
                 <tbody>
         """
-        # Filas de datos cargadas
         for _, row in resultado_inv.iterrows():
             html_inventario += "<tr>"
             for col in resultado_inv.columns:
                 valor = row[col]
-                # Formatear números grandes con separadores de miles
                 if isinstance(valor, (int, float)) and valor >= 1000:
                     valor_str = f"{valor:,.0f} Gs." if "precio" in col.lower() or "costo" in col.lower() else f"{valor:,.0f}"
                 else:
                     valor_str = str(valor)
                 
-                # Destacar la celda identificada como nombre del producto
                 if col == columna_producto_real:
                     html_inventario += f'<td style="padding: 10px; border: 1px solid #ddd; font-weight: bold; color: #2c3e50;">{valor_str}</td>'
                 else:
@@ -412,7 +387,6 @@ def procesar_consulta(consulta, seleccion_previa=None):
             
         html_inventario += "</tbody></table></div>"
 
-    # Búsqueda semántica integrada en los PDFs (aplicando filtros restrictivos si coincide con producto)
     resultados_pdf = buscar_en_pdfs(
         consulta, 
         coincide_producto=coincide_producto, 
@@ -434,7 +408,6 @@ def procesar_consulta(consulta, seleccion_previa=None):
                 <tbody>
         """
         for doc in resultados_pdf:
-            # Formateado amigable y limpio de viñetas para que se rendericen correctamente
             contenido_formateado = doc['Contenido'].replace("•", "<br>•").replace("\n", "<br>")
             if contenido_formateado.startswith("<br>"):
                 contenido_formateado = contenido_formateado[4:]
@@ -463,7 +436,6 @@ def procesar_consulta(consulta, seleccion_previa=None):
     }
 
 
-# --- 6. INTERFAZ DE GRADIO (Compatibilidad Total con Gradio 6) ---
 warm_theme = gr.themes.Default(
     primary_hue="orange",
     secondary_hue="amber",
@@ -481,7 +453,6 @@ bienvenida = """
 
 
 def buscar_por_texto(texto):
-    """Manejador disparado cuando el usuario escribe en la barra de búsqueda y presiona Enter o Buscar."""
     if not texto or not texto.strip():
         return (
             "<p style='color: #e74c3c; font-weight: bold; font-family: sans-serif;'>Por favor, escribe una pregunta válida.</p>", 
@@ -492,14 +463,12 @@ def buscar_por_texto(texto):
     res = procesar_consulta(texto)
     
     if res["tipo"] == "multiples_opciones":
-        # Activar el selector de Radio con las opciones y vaciar el valor para prevenir error de Gradio
         return (
             res["html"], 
             gr.update(choices=res["opciones"], value=res["opciones"][0], visible=True), 
             gr.update(visible=True)
         )
     else:
-        # Ocultar el selector y vaciar choices y value para evitar validaciones cruzadas erróneas de Gradio
         return (
             res["html"], 
             gr.update(visible=False, choices=[], value=None), 
@@ -508,7 +477,6 @@ def buscar_por_texto(texto):
 
 
 def buscar_por_seleccion(seleccion):
-    """Manejador disparado cuando el usuario hace clic en el botón de confirmar la opción elegida del Radio."""
     if not seleccion:
         return (
             "<p style='color: #e74c3c; font-weight: bold; font-family: sans-serif;'>Por favor, selecciona una opción válida.</p>", 
@@ -549,7 +517,6 @@ with gr.Blocks(title="Agente IA - Mercado Central 24 Hs.") as demo:
         value="<div style='color: #7f8c8d; text-align: center; padding: 40px; font-style: italic; font-family: sans-serif;'>Los resultados de tu búsqueda aparecerán en este panel de manera estructurada y prolija.</div>"
     )
 
-    # Registro de disparadores de interacción
     btn_buscar.click(
         fn=buscar_por_texto, 
         inputs=[input_txt], 
