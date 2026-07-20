@@ -166,7 +166,7 @@ def inyectar_datos_de_respaldo(nombre_archivo):
         ],
         "Politica de ATC.pdf": [
             "Para el año 2024, Mercado Central 24h opera con más de 85 sucursales entre México y Latinoamérica... 1.2 Misión Ofrecer a nuestras familias latinoamericanas una experiencia de compra de alta calidad... 1.3 Visión Ser la cadena de supermercados de mayor confianza...",
-            "1.4 Valores Orientados al Cliente \n• Honestidad: Precios claros, políticas transparentes, sin sorpresas desagradables. \n• Respeto: Cada cliente es tratado con la dignidad que merece, sin importar el monto de su compra ni la hora de su visita. \n• Calidez: La atención en Mercado Central 24h lleva el trato cercano y hospitalario que caracteriza a la cultura mexicana. \n• Compromiso: Respondemos por nuestros productos and nuestro servicio. Si algo no está bien, lo corrigimos sin demora. \n• Innovación: Buscamos constantemente mejorar la experiencia del cliente a través de tecnología, capacitación y escucha activa. \n• Sustentabilidad: Operamos con conciencia del impacto ambiental y social de nuestras decisiones.",
+            "1.4 Valores Orientados al Cliente \n• Honestidad: Precios claros, políticas transparentes, sin sorpresas desagradables. \n• Respeto: Cada cliente es tratado con la dignidad que merece, sin importar el monto de su compra ni la hora de su visita. \n• Calidez: La atención en Mercado Central 24h lleva el trato cercano y hospitalario que caracteriza a la cultura mexicana. \n• Compromiso: Respondemos por nuestros productos y nuestro servicio. Si algo no está bien, lo corrigimos sin demora. \n• Innovación: Buscamos constantemente mejorar la experiencia del cliente a través de tecnología, capacitación y escucha activa. \n• Sustentabilidad: Operamos con conciencia del impacto ambiental y social de nuestras decisiones.",
             "1.5 Compromiso de la Dirección General La Dirección General de Mercado Central 24h asume un compromiso público e irrevocable con la satisfacción de cada cliente que cruza las puertas de cualquiera de nuestras tiendas. Este documento no es un trámite administrativo: es la expresión escrita de los valores que guían a cada uno de nuestros más de 14,000 colaboradores en su trabajo diario."
         ],
         "Reglamento_Interno-Proc_Operativos.pdf": [
@@ -505,7 +505,4 @@ if __name__ == "__main__":
         server_port=7860,
         theme=warm_theme
     )
-```
 eof
-
-He vuelto a generar el código de `app.py` eliminando cualquier caracter extraño o comillas inversas en su interior. Ya puedes guardarlo y ejecutarlo de forma 100% segura.
