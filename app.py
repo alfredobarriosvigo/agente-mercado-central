@@ -1,4 +1,5 @@
 import os
+import re
 import pandas as pd
 import gradio as gr
 from pypdf import PdfReader
@@ -24,13 +25,13 @@ def crear_archivos_demo():
     if not os.path.exists(RUTA_INVENTARIO):
         df_inv = pd.DataFrame({
             "Producto": [
-                "Arroz tipo 1", "Arroz tipo 2", "Arroz Integral Premium", 
+                "Arroz tipo 1", "Arroz tipo 1", "Arroz tipo 2", "Arroz Integral Premium", 
                 "Aceite de Girasol 1L", "Aceite de Oliva Extra Virgen", 
                 "Azúcar Ledesma 1kg", "Fideos Tallarín 500g"
             ],
-            "Stock (U)": [120, 85, 40, 200, 95, 300, 150],
-            "Precio (Gs)": [7500, 6000, 12000, 14500, 45000, 6500, 5200],
-            "Ubicación": ["Pasillo A", "Pasillo A", "Pasillo B", "Pasillo C", "Pasillo C", "Pasillo D", "Pasillo E"]
+            "Stock (U)": [120, 30, 85, 40, 200, 95, 300, 150],
+            "Precio (Gs)": [7500, 7500, 6000, 12000, 14500, 45000, 6500, 5200],
+            "Ubicación": ["Pasillo A", "Depósito Norte", "Pasillo A", "Pasillo B", "Pasillo C", "Pasillo C", "Pasillo D", "Pasillo E"]
         })
         df_inv.to_excel(RUTA_INVENTARIO, index=False)
         print("✓ Creado archivo demo: Inventario.xlsx")
@@ -52,6 +53,59 @@ model = SentenceTransformer('all-MiniLM-L6-v2')
 df_inventario = pd.DataFrame()
 documentos_extraidos = []
 columna_producto_real = None  # Almacena el nombre dinámico de la columna de productos encontrada
+
+
+def chunkear_texto_inteligente(texto):
+    """Segmenta el texto de PDFs de forma atómica respetando viñetas y títulos."""
+    lineas = [l.strip() for l in texto.split("\n") if l.strip()]
+    chunks = []
+    current_chunk = []
+    
+    for linea in lineas:
+        # Detectar si la línea actual representa una viñeta o un elemento de lista
+        es_vineta = (
+            linea.startswith("•") or 
+            linea.startswith("-") or 
+            linea.startswith("*") or 
+            re.match(r"^\d+[\.\)]\s", linea)
+        )
+        
+        if es_vineta:
+            current_chunk.append(linea)
+        else:
+            if current_chunk:
+                chunks.append("\n".join(current_chunk))
+                current_chunk = []
+            current_chunk.append(linea)
+            
+    if current_chunk:
+        chunks.append("\n".join(current_chunk))
+    
+    # Fusionar inteligentemente títulos cortos con sus listas estructuradas subsecuentes
+    merged_chunks = []
+    i = 0
+    while i < len(chunks):
+        chunk = chunks[i]
+        if i + 1 < len(chunks):
+            siguiente = chunks[i+1]
+            tiene_vinetas = (
+                siguiente.startswith("•") or 
+                siguiente.startswith("-") or 
+                siguiente.startswith("*") or 
+                re.match(r"^\d+[\.\)]\s", siguiente) or
+                "\n•" in siguiente or 
+                "\n-" in siguiente
+            )
+            # Si el chunk actual es una cabecera corta de la lista de viñetas que le sigue
+            if len(chunk) < 200 and tiene_vinetas:
+                merged_chunks.append(chunk + "\n" + siguiente)
+                i += 2
+                continue
+        merged_chunks.append(chunk)
+        i += 1
+        
+    return [c.strip() for c in merged_chunks if len(c.strip()) > 15]
+
 
 def cargar_base_de_conocimiento():
     global df_inventario, documentos_extraidos, columna_producto_real
@@ -91,7 +145,7 @@ def cargar_base_de_conocimiento():
         print(f"Error al cargar Inventario.xlsx: {e}")
         df_inventario = pd.DataFrame()
 
-    # B. Cargar y Extraer Texto de PDFs (Con fallback por si los archivos son temporales de prueba)
+    # B. Cargar y Extraer Texto de PDFs (Con segmentador estructurado de textos)
     for nombre_archivo, ruta in RUTAS_PDFS.items():
         try:
             if os.path.exists(ruta):
@@ -105,12 +159,11 @@ def cargar_base_de_conocimiento():
                 
                 # Validar si el PDF contiene texto útil legible o es un marcador temporal vacío
                 if len(texto_archivo.strip()) > 50:
-                    # Segmentamos por párrafos o saltos dobles para afinar la similitud
-                    parrafos = [p.strip() for p in texto_archivo.split("\n\n") if len(p.strip()) > 20]
-                    for p in parrafos:
+                    chunks = chunkear_texto_inteligente(texto_archivo)
+                    for c in chunks:
                         documentos_extraidos.append({
                             "origen": nombre_archivo.replace(".pdf", "").replace("_", " "),
-                            "contenido": p
+                            "contenido": c
                         })
                 else:
                     inyectar_datos_de_respaldo(nombre_archivo)
@@ -119,25 +172,26 @@ def cargar_base_de_conocimiento():
             print(f"Error leyendo PDF {nombre_archivo} ({e}). Usando datos de respaldo predefinidos.")
             inyectar_datos_de_respaldo(nombre_archivo)
 
+
 def inyectar_datos_de_respaldo(nombre_archivo):
     """Inyecta textos de consulta real si los PDFs físicos se encuentran vacíos o son ilegibles."""
     respaldo = {
         "FAQ.pdf": [
-            "Horarios de atención: El mercado opera las 24 horas del día, los 365 días del año. Las oficinas administrativas atienden de lunes a viernes de 08:00 a 17:00 hs.",
-            "Estacionamiento: El ingreso es gratuito las primeras 2 horas para vehículos particulares. Los transportistas de gran porte abonan tarifa fija reglamentada."
+            "¿Cuáles son los horarios de atención al público general del Mercado Central? El mercado opera las 24 horas del día, los 365 días del año de forma ininterrumpida. Las oficinas de facturación y administración atienden de lunes a viernes de 08:00 a 17:00 hs.",
+            "¿El estacionamiento tiene costo dentro del predio? El ingreso y estacionamiento de vehículos particulares livianos es completamente gratuito durante las primeras 2 horas. Los transportistas de gran porte para carga y descarga abonan una tarifa fija reglamentada en la cabina del portón de entrada."
         ],
         "Manual_Proveedores-Politicas_Compra.pdf": [
             "Destinatarios del Manual de Proveedores:\n• Proveedores actuales de Mercado Central 24h en México y en todos los países donde la empresa opera.\n• Candidatos a nuevos proveedores que deseen integrarse a nuestra base de suministro.\n• Personal interno del área de Compras, Almacén, Calidad y Finanzas que interactúa con proveedores.\n• Auditores internos y externos que revisen los procesos de abastecimiento.",
-            "Plazos de pago: Los pagos estándar están fijados para los días viernes de cada semana, con una acreditación estimada a los 30 días corridos post-factura.",
-            "Recepción de mercadería: Se realiza de lunes a sábados en la dársena de cargas número 3, de 06:00 a 12:00 hs. Se requiere turno previo."
+            "Los plazos de pago estándar para proveedores de productos secos y frescos están fijados para los días viernes de cada semana, con una acreditación estimada a los 30 días corridos posteriores a la recepción de la factura comercial debidamente aprobada.",
+            "La recepción de mercadería y control de calidad se realiza exclusivamente de lunes a sábados en la darsena de cargas número 3, en el rango horario de 06:00 a 12:00 hs. Se requiere solicitar turno previamente en el portal oficial de compras."
         ],
         "Politica de ATC.pdf": [
-            "Política de devoluciones: Cualquier solicitud de cambio por defecto debe gestionarse dentro de las primeras 24 horas tras la compra, presentando el ticket original.",
-            "Medios de pago: Efectivo (guaraníes), tarjetas de crédito/débito y pagos unificados por código QR bancario."
+            "La política de atención al cliente (ATC) del Mercado Central determina que cualquier solicitud de cambio o devolución de productos defectuosos de fábrica debe gestionarse dentro de las primeras 24 horas posteriores a la compra, presentando el ticket físico original.",
+            "Los medios de pago autorizados en los puntos de venta habilitados incluyen efectivo en moneda de curso legal (guaraníes), tarjetas de crédito y débito de procesadoras autorizadas, y pagos unificados por código QR bancario."
         ],
         "Reglamento_Interno-Proc_Operativos.pdf": [
-            "Uniforme: Es obligatorio el uso de uniforme reglamentario completo, calzado de seguridad con puntera reforzada y credencial de identidad visible.",
-            "Limpieza de góndolas: Cada encargado debe realizar la limpieza, ordenamiento y sanitización al inicio y al cierre de cada turno."
+            "Es una directiva obligatoria para todo el personal operativo de piso presentarse a su jornada laboral vistiendo el uniforme reglamentario completo, calzado de seguridad con puntera reforzada y portar en el pecho la credencial de identidad visible.",
+            "Procedimiento preventivo para góndolas: Cada encargado de pasillo debe realizar la limpieza, ordenamiento físico y sanitización de las góndolas asignadas al inicio y al cierre de cada de sus turnos operativos."
         ]
     }
     if nombre_archivo in respaldo:
@@ -153,7 +207,7 @@ cargar_base_de_conocimiento()
 
 # --- 4. MOTOR DE BÚSQUEDA SEMÁNTICA LOCAL (Hugging Face) ---
 def buscar_en_pdfs(consulta, umbral=0.45):
-    """Busca coincidencias con un umbral más estricto para mayor precisión."""
+    """Busca coincidencias aplicando un filtro relativo para eliminar textos de relleno."""
     if not documentos_extraidos:
         return []
         
@@ -172,32 +226,17 @@ def buscar_en_pdfs(consulta, umbral=0.45):
                 "score": score.item()
             })
             
-    # Ordenar y limitar a 1 o 2 resultados si la coincidencia es muy alta
+    # Ordenar por puntaje de relevancia decreciente
     resultados_filtrados = sorted(resultados_filtrados, key=lambda x: x['score'], reverse=True)
-    return resultados_filtrados[:2] 
-
-    """Busca coincidencias en los documentos PDF con un umbral de relevancia dinámico."""
-    if not documentos_extraidos:
-        return []
-        
-    textos_a_comparar = [doc["contenido"] for doc in documentos_extraidos]
     
-    query_emb = model.encode(consulta, convert_to_tensor=True)
-    doc_embs = model.encode(textos_a_comparar, convert_to_tensor=True)
-    cosine_scores = util.cos_sim(query_emb, doc_embs)[0]
-    
-    resultados_filtrados = []
-    for idx, score in enumerate(cosine_scores):
-        if score.item() > umbral:  # Uso de umbral adaptativo
-            resultados_filtrados.append({
-                "Origen": documentos_extraidos[idx]["origen"],
-                "Contenido": documentos_extraidos[idx]["contenido"],
-                "score": score.item()
-            })
+    # FILTRADO RELATIVO: Si el mejor resultado es excelente, descartamos los significativamente peores
+    if resultados_filtrados:
+        mejor_score = resultados_filtrados[0]['score']
+        if mejor_score > 0.55:
+            # Mantener solo aquellos resultados que estén al menos al 85% de similitud del mejor puntaje
+            resultados_filtrados = [r for r in resultados_filtrados if r['score'] >= (mejor_score * 0.85)]
             
-    # Ordenar las respuestas por puntuación de relevancia decreciente
-    resultados_filtrados = sorted(resultados_filtrados, key=lambda x: x['score'], reverse=True)
-    return resultados_filtrados[:3]
+    return resultados_filtrados[:2]
 
 
 # --- 5. LÓGICA DE PROCESAMIENTO Y RESPUESTAS (Planillas Dinámicas HTML) ---
@@ -212,35 +251,37 @@ def procesar_consulta(consulta, seleccion_previa=None):
     coincidencias = []
     inventario_habilitado = not df_inventario.empty and columna_producto_real is not None
     
-    # Evaluar si es una consulta de stock general (ej: "mostrar inventario", "lista de productos")
+    # Evaluar si es una consulta de stock general (ej: "mostrar inventario")
     palabras_clave_general = ["inventario", "productos", "stock", "lista de productos", "todos los productos", "tabla de productos", "ver el stock", "stock total"]
     es_consulta_general_inventario = any(k in consulta_limpia for k in palabras_clave_general)
     
     if inventario_habilitado:
         productos_disponibles = df_inventario[columna_producto_real].astype(str).tolist()
         
-        # Tokenizamos la consulta para una búsqueda inteligente basada en NLP
+        # Tokenizamos la consulta para una búsqueda basada en NLP de coincidencia parcial o por palabras clave
         palabras_consulta = [w.strip(",.!?();:").lower() for w in consulta_limpia.split()]
-        palabras_consulta = [w for w in palabras_consulta if len(w) > 1] # Ignorar caracteres sueltos
+        palabras_consulta = [w for w in palabras_consulta if len(w) > 1]
         
         for p in productos_disponibles:
             p_lower = p.lower()
             
-            # Condición 1: El nombre completo del producto se encuentra citado en la pregunta del usuario
+            # Condición 1: El nombre completo del producto está citado literalmente en la pregunta
             if p_lower in consulta_limpia:
                 coincidencias.append(p)
                 continue
             
-            # Condición 2: Alguna palabra clave de alta relevancia del producto se encuentra en la consulta
+            # Condición 2: Alguna palabra de relevancia coincide con la consulta
             tokens_producto = [t.strip(",.!?();:").lower() for t in p_lower.split()]
-            # Excluimos palabras vacías comunes para evitar falsos positivos
             stop_words = {"de", "del", "el", "la", "en", "para", "un", "una", "con", "y", "tipo", "g", "kg", "ml", "1l", "500g", "1kg", "sus", "precios", "precio"}
             tokens_clave = [t for t in tokens_producto if t not in stop_words]
             
             if any(t in palabras_consulta for t in tokens_clave):
                 coincidencias.append(p)
+                
+    # AGRUPACIÓN: Eliminar duplicados para que sugerencias similares se unifiquen por descripción
+    coincidencias = list(dict.fromkeys(coincidencias))
     
-    # Menú dinámico de aproximación lógica (Ej: escribe 'Arroz' -> devuelve listado múltiple de opciones de arroz)
+    # Menú dinámico si encontramos múltiples opciones unificadas
     if len(coincidencias) > 1 and not any(p.lower() == consulta_limpia for p in coincidencias):
         return {
             "tipo": "multiples_opciones",
@@ -248,17 +289,16 @@ def procesar_consulta(consulta, seleccion_previa=None):
             "html": f"<p style='color: #d35400; font-weight: bold; font-family: sans-serif;'>🔍 Encontramos varias opciones de productos para '{consulta}'. Por favor, elija una de la lista:</p>"
         }
     
-    # Obtener el registro único seleccionado, identificado del inventario o mostrar tabla completa
+    # Obtener registros coincidentes (retornará todas las filas que compartan esa misma descripción)
     resultado_inv = pd.DataFrame()
     if len(coincidencias) == 1:
         resultado_inv = df_inventario[df_inventario[columna_producto_real] == coincidencias[0]]
     elif inventario_habilitado and any(p.lower() == consulta_limpia for p in df_inventario[columna_producto_real].astype(str).str.lower().tolist()):
         resultado_inv = df_inventario[df_inventario[columna_producto_real].astype(str).str.lower() == consulta_limpia]
     elif es_consulta_general_inventario and inventario_habilitado:
-        # Si pide el inventario en general, retornamos toda la tabla
         resultado_inv = df_inventario
 
-    # Armar planilla HTML de Inventario de forma dinámica
+    # Armar planilla HTML de Inventario con cabeceras optimizadas en blanco
     html_inventario = ""
     if not resultado_inv.empty:
         html_inventario = f"""
@@ -268,27 +308,24 @@ def procesar_consulta(consulta, seleccion_previa=None):
                 <thead>
                     <tr style="background-color: #34495e;">
         """
-        # Cabeceras dinámicas basadas en tu Excel con fuente explícitamente blanca (color: white;)
+        # Cabeceras dinámicas con fuente blanca forzada inline
         for col in resultado_inv.columns:
-            html_inventario += f'<th style="padding: 10px; border: 1px solid #ddd; color: white; font-weight: bold;">{col}</th>'
+            html_inventario += f'<th style="padding: 10px; border: 1px solid #ddd; color: white !important; font-weight: bold;">{col}</th>'
             
         html_inventario += """
                     </tr>
                 </thead>
                 <tbody>
         """
-        # Filas de datos cargadas
         for _, row in resultado_inv.iterrows():
             html_inventario += "<tr>"
             for col in resultado_inv.columns:
                 valor = row[col]
-                # Formatear números grandes con separadores de miles
                 if isinstance(valor, (int, float)) and valor > 1000:
                     valor_str = f"{valor:,.0f} Gs." if "precio" in col.lower() or "costo" in col.lower() else f"{valor:,.0f}"
                 else:
                     valor_str = str(valor)
                 
-                # Destacar la celda identificada como nombre del producto
                 if col == columna_producto_real:
                     html_inventario += f'<td style="padding: 10px; border: 1px solid #ddd; font-weight: bold; color: #2c3e50;">{valor_str}</td>'
                 else:
@@ -297,7 +334,6 @@ def procesar_consulta(consulta, seleccion_previa=None):
             
         html_inventario += "</tbody></table></div>"
 
-    # Aviso prolijo si el Excel no cumple con los formatos de columnas
     if not df_inventario.empty and columna_producto_real is None:
         columnas_disponibles_str = ", ".join([f"'{c}'" for c in df_inventario.columns])
         html_inventario = f"""
@@ -307,13 +343,10 @@ def procesar_consulta(consulta, seleccion_previa=None):
         </div>
         """
 
-    # --- ENRUTAMIENTO DINÁMICO DE PDFS (UMBRAL ADAPTATIVO) ---
-    # Si detectamos que la pregunta está claramente enfocada en el inventario o encontramos coincidencia, 
-    # subimos el umbral para evitar que PDFs irrelevantes agreguen "ruido" o falsos positivos.
+    # Ajuste adaptativo del umbral para PDFs basándonos en la intención
     tiene_contexto_inventario = len(coincidencias) > 0 or not resultado_inv.empty or es_consulta_general_inventario
     umbral_dinamico = 0.45 if tiene_contexto_inventario else 0.32
 
-    # Búsqueda semántica integrada en los PDFs (incluye FAQ, Políticas, Manuales y Reglamento)
     resultados_pdf = buscar_en_pdfs(consulta, umbral=umbral_dinamico)
     html_pdfs = ""
     if resultados_pdf:
@@ -323,17 +356,19 @@ def procesar_consulta(consulta, seleccion_previa=None):
             <table style="width:100%; border-collapse: collapse; font-family: sans-serif; text-align: left; background-color: #fafafa;">
                 <thead>
                     <tr style="background-color: #2c3e50; color: white;">
-                        <th style="padding: 10px; border: 1px solid #ddd; width: 30%; color: white;">Documento Fuente (.pdf)</th>
-                        <th style="padding: 10px; border: 1px solid #ddd; width: 70%; color: white;">Contenido Extractado</th>
+                        <th style="padding: 10px; border: 1px solid #ddd; width: 30%; color: white !important;">Documento Fuente (.pdf)</th>
+                        <th style="padding: 10px; border: 1px solid #ddd; width: 70%; color: white !important;">Contenido Extractado</th>
                     </tr>
                 </thead>
                 <tbody>
         """
         for doc in resultados_pdf:
+            # Formatear saltos de línea para renderizado prolijo en HTML (especialmente para viñetas)
+            contenido_formateado = doc['Contenido'].replace('\n', '<br>')
             html_pdfs += f"""
                     <tr>
                         <td style="padding: 10px; border: 1px solid #ddd; color: #d35400; font-size: 0.9em; font-weight: bold;">{doc['Origen']}</td>
-                        <td style="padding: 10px; border: 1px solid #ddd; line-height: 1.5; color: #2c3e50;">{doc['Contenido']}</td>
+                        <td style="padding: 10px; border: 1px solid #ddd; line-height: 1.5; color: #2c3e50;">{contenido_formateado}</td>
                     </tr>
             """
         html_pdfs += "</tbody></table></div>"
@@ -370,7 +405,6 @@ bienvenida = """
 </div>
 """
 
-# Se mantiene 'title' en Blocks (que es lo correcto para la pestaña del navegador)
 with gr.Blocks(title="Agente IA - Mercado Central 24 Hs.") as demo:
     gr.HTML(bienvenida)
     
@@ -396,9 +430,8 @@ with gr.Blocks(title="Agente IA - Mercado Central 24 Hs.") as demo:
         value="<div style='color: #7f8c8d; text-align: center; padding: 40px; font-style: italic; font-family: sans-serif;'>Los resultados de tu búsqueda aparecerán en este panel de manera estructurada y prolija.</div>"
     )
 
-    # Separación lógica del flujo de eventos: Evita arrastrar variables antiguas del selector de radio
     def buscar_por_texto(texto):
-        """Maneja las búsquedas ingresadas directamente en la caja de texto."""
+        """Maneja búsquedas directas en la barra de texto."""
         if not texto or not texto.strip():
             return (
                 "<p style='color: #e74c3c; font-weight: bold; font-family: sans-serif;'>Por favor, escribe una pregunta válida.</p>", 
@@ -417,12 +450,12 @@ with gr.Blocks(title="Agente IA - Mercado Central 24 Hs.") as demo:
         else:
             return (
                 res["html"], 
-                gr.update(visible=False, choices=[], value=None), # 'value=None' previene que Gradio lance error al vaciar 'choices'
+                gr.update(visible=False, choices=[], value=None), 
                 gr.update(visible=False)
             )
 
     def buscar_por_seleccion(seleccion):
-        """Maneja las búsquedas cuando el usuario confirma una de las opciones del control de Radio."""
+        """Maneja las selecciones confirmadas en el menú Radio."""
         if not seleccion:
             return (
                 "<p style='color: #e74c3c; font-weight: bold; font-family: sans-serif;'>Por favor, selecciona una opción.</p>", 
@@ -437,7 +470,7 @@ with gr.Blocks(title="Agente IA - Mercado Central 24 Hs.") as demo:
             gr.update(visible=False)
         )
 
-    # Registro de disparadores de interacción con flujos independientes
+    # Registro de disparadores
     btn_buscar.click(
         fn=buscar_por_texto, 
         inputs=[input_txt], 
@@ -455,7 +488,6 @@ with gr.Blocks(title="Agente IA - Mercado Central 24 Hs.") as demo:
     )
 
 if __name__ == "__main__":
-    # 'theme' se pasa en el launch() para cumplir de forma limpia con Gradio 6
     demo.launch(
         server_name="0.0.0.0", 
         server_port=7860,
