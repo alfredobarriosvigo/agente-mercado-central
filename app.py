@@ -56,40 +56,46 @@ columna_producto_real = None
 def chunkear_texto_inteligente(texto):
     """
     Segmenta el texto de manera semántica y jerárquica.
-    Une líneas de listas continuas sin romper viñetas e identifica cambios drásticos de subsección.
+    Detecta preguntas (que inician con ¿ o contienen ?) y títulos de sección para iniciar nuevos chunks de forma limpia.
     """
     lineas = [l.strip() for l in texto.split("\n") if l.strip()]
     chunks = []
     buffer_actual = []
     
-    # Expresión regular para detectar subsecciones numéricas como 1.4, 2.2, etc.
-    es_seccion = re.compile(r'^\d+\.\d+\s+[A-Z]')
+    # Expresiones regulares para detectar cortes lógicos naturales
+    es_seccion = re.compile(r'^(\d+\.\d+|\d+\.\d+\.\d+)\s+[A-Z]')
+    es_seccion_palabra = re.compile(r'^(SECCIÓN|CAPÍTULO|TITULO|PROCESO|POLÍTICA|REGLA)\s+\d+', re.IGNORECASE)
     
-    for i, linea in enumerate(lineas):
-        # Si detectamos un cambio formal de subsección, cerramos el bloque anterior e iniciamos uno nuevo
-        if es_seccion.match(linea) and buffer_actual:
+    for linea in lineas:
+        # Detectar si la línea representa una nueva pregunta o sección formal
+        es_pregunta = (linea.startswith("¿") or 
+                       linea.endswith("?") or 
+                       (linea.lower().startswith("preg") and ":" in linea))
+        
+        # Si detectamos un cambio de sección o una nueva pregunta, guardamos el bloque anterior
+        if (es_seccion.match(linea) or es_seccion_palabra.match(linea) or es_pregunta) and buffer_actual:
             chunks.append(" ".join(buffer_actual))
             buffer_actual = []
             
-        # Si la línea anterior termina sin signo de puntuación y la actual no empieza con viñeta, las fusionamos
+        # Unimos líneas continuas respetando viñetas y puntuaciones
         if buffer_actual and not buffer_actual[-1].endswith(('.', ':', ';', '?')) and not linea.startswith(('•', '-', '*', '1.', '2.', '3.', '4.', '5.')):
             buffer_actual[-1] += " " + linea
         else:
             buffer_actual.append(linea)
             
-        # Controlamos que los bloques no crezcan demasiado en líneas sueltas
-        if len(buffer_actual) >= 18:
+        # Controlamos que los bloques sin divisiones naturales no excedan un tamaño prudente
+        if len(buffer_actual) >= 15:
             chunks.append(" ".join(buffer_actual))
             buffer_actual = []
             
     if buffer_actual:
         chunks.append(" ".join(buffer_actual))
         
-    # Limpiamos y eliminamos fragmentos que sean extremadamente cortos
+    # Filtrado y limpieza final de fragmentos muy cortos
     chunks_limpios = []
     for c in chunks:
         c_strip = c.strip()
-        if len(c_strip) > 40:
+        if len(c_strip) > 30:
             chunks_limpios.append(c_strip)
             
     return chunks_limpios
@@ -164,11 +170,11 @@ def inyectar_datos_de_respaldo(nombre_archivo):
         ],
         "Manual_Proveedores-Politicas_Compra.pdf": [
             "1.3 Objetivo del Manual y a Quién Va Dirigido, subsección: Destinatarios. El contenido de este manual de compras es de cumplimiento obligatorio para: \n• Proveedores actuales de Mercado Central 24h en México y en todos los países donde la empresa opera. \n• Candidatos a nuevos proveedores que deseen integrarse a nuestra base de suministro. \n• Personal interno del área de Compras, Almacén, Calidad y Finanzas que interactúa con proveedores. \n• Auditores internos y externos que revisen los procesos de abastecimiento.",
-            "La recepción de mercadería y control de calidad se realiza exclusivamente de lunes a sábados en la dársea de cargas número 3, en el rango de 06:00 a 12:00 hs. Se requiere solicitar turno previamente en el portal oficial de compras."
+            "La recepción de mercadería y control de calidad se realiza exclusivamente de lunes a sábados en la dársena de cargas número 3, en el rango de 06:00 a 12:00 hs. Se requiere solicitar turno previamente en el portal oficial de compras."
         ],
         "Politica de ATC.pdf": [
             "Para el año 2024, Mercado Central 24h opera con más de 85 sucursales entre México y Latinoamérica... 1.2 Misión Ofrecer a nuestras familias latinoamericanas una experiencia de compra de alta calidad... 1.3 Visión Ser la cadena de supermercados de mayor confianza...",
-            "1.4 Valores Orientados al Cliente \n• Honestidad: Precios claros, políticas transparentes, sin sorpresas desagradables. \n• Respeto: Cada cliente es tratado con la dignidad que merece, sin importar el monto de su compra ni la hora de su visita. \n• Calidez: La atención en Mercado Central 24h lleva el trato cercano y hospitalario que caracteriza a la cultura mexicana. \n• Compromiso: Respondemos por nuestros productos y nuestro servicio. Si algo no está bien, lo corrigimos sin demora. \n• Innovación: Buscamos constantemente mejorar la experiencia del cliente a través de tecnología, capacitación and escucha activa. \n• Sustentabilidad: Operamos con conciencia del impacto ambiental y social de nuestras decisiones.",
+            "1.4 Valores Orientados al Cliente \n• Honestidad: Precios claros, políticas transparentes, sin sorpresas desagradables. \n• Respeto: Cada cliente es tratado con la dignidad que merece, sin importar el monto de su compra ni la hora de su visita. \n• Calidez: La atención en Mercado Central 24h lleva el trato cercano y hospitalario que caracteriza a la cultura mexicana. \n• Compromiso: Respondemos por nuestros productos y nuestro servicio. Si algo no está bien, lo corrigimos sin demora. \n• Innovación: Buscamos constantemente mejorar la experiencia del cliente a través de tecnología, capacitación y escucha activa. \n• Sustentabilidad: Operamos con conciencia del impacto ambiental y social de nuestras decisiones.",
             "1.5 Compromiso de la Dirección General La Dirección General de Mercado Central 24h asume un compromiso público e irrevocable con la satisfacción de cada cliente que cruza las puertas de cualquiera de nuestras tiendas. Este documento no es un trámite administrativo: es la expresión escrita de los valores que guían a cada uno de nuestros más de 14,000 colaboradores en su trabajo diario."
         ],
         "Reglamento_Interno-Proc_Operativos.pdf": [
@@ -202,9 +208,12 @@ def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None
     resultados_filtrados = []
     query_norm = consulta.lower()
     
-    # Palabras clave de estacionamiento para validación cruzada estricta
+    # Palabras clave de estacionamiento para segmentación contextual estricta
     terminos_estacionar = ["estacionamiento", "estacionar", "parqueo", "cochera", "garaje"]
     consulta_es_estacionamiento = any(term in query_norm for term in terminos_estacionar)
+    consulta_es_costo_estacionamiento = consulta_es_estacionamiento and any(
+        term in query_norm for term in ["costo", "precio", "pagar", "tarifa", "gratis", "gratuito", "cobro", "cobra", "cobran", "paga", "cuanto", "monto", "pesos", "mxn"]
+    )
     
     for idx, score in enumerate(cosine_scores):
         chunk_original = documentos_extraidos[idx]["contenido"]
@@ -252,14 +261,42 @@ def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None
             else:
                 score_final -= 0.20
 
-        # 4. Control de Contexto Estricto y Hermético para Estacionamiento (CORRECCIÓN DE ERROR)
+        # 4. Control de Contexto Estricto y Hermético para Estacionamiento (CORRECCIÓN DE ERROR CRÍTICO)
         if consulta_es_estacionamiento:
-            # Solo los fragmentos que contengan palabras directas de estacionamiento reciben el bono masivo
-            if any(term in chunk_norm for term in terminos_estacionar):
-                score_final += 0.85
+            es_chunk_estacionamiento = any(term in chunk_norm for term in terminos_estacionar)
+            
+            if es_chunk_estacionamiento:
+                # Determinar si es la respuesta de tarifas oficial o menciones incidentales
+                es_politica_costo_estacionamiento = (
+                    "primeras 2 horas" in chunk_norm or 
+                    "consumo mínimo" in chunk_norm or 
+                    "tarifa comercial" in chunk_norm or 
+                    "validar su boleto" in chunk_norm or 
+                    "costo para los clientes" in chunk_norm
+                )
+                
+                if consulta_es_costo_estacionamiento:
+                    if es_politica_costo_estacionamiento:
+                        score_final += 1.50  # Boost masivo exclusivo para la respuesta esperada
+                    else:
+                        score_final -= 0.60  # Penalización a menciones complementarias (como accesibilidad o VIP)
+                else:
+                    if es_politica_costo_estacionamiento:
+                        score_final += 0.85
+                    else:
+                        score_final += 0.20
             else:
-                # Cualquier fragmento que no trate sobre estacionamiento es drásticamente descartado
-                score_final -= 0.80
+                # Descarte inmediato y absoluto si el chunk no tiene relación con estacionar
+                score_final -= 0.90
+                
+            # Penalizar de forma proactiva si es pregunta de costo y trata sobre VIP, accesibilidad o seguridad
+            if consulta_es_costo_estacionamiento:
+                es_vip_lealtad = any(term in chunk_norm for term in ["vip", "pesos central", "canje", "membresía", "puntos"])
+                es_accesibilidad = any(term in chunk_norm for term in ["accesibilidad", "rampas", "pasillos", "braille", "discapacidad"])
+                es_seguridad = any(term in chunk_norm for term in ["inseguridad", "robo", "amenaza", "cctv", "911", "emergencia"])
+                
+                if es_vip_lealtad or es_accesibilidad or es_seguridad:
+                    score_final -= 0.80
 
         # C. FILTRADO POR UMBRAL DE RELEVANCIA
         umbral_limite = 0.45 if coincide_producto else 0.32
@@ -324,7 +361,7 @@ def procesar_consulta(consulta):
     coincidencias = []
     inventario_habilitado = not df_inventario.empty and columna_producto_real is not None
     
-    # 1. Comprobación de coincidencia exacta primero (evita bucles infinitos en selectores múltiples)
+    # 1. Comprobación de coincidencia exacta primero
     es_match_exacto = False
     if inventario_habilitado:
         productos_disponibles = df_inventario[columna_producto_real].astype(str).tolist()
@@ -338,7 +375,7 @@ def procesar_consulta(consulta):
     if not es_match_exacto and inventario_habilitado and palabras_clave:
         productos_disponibles = df_inventario[columna_producto_real].astype(str).tolist()
         
-        # Filtramos palabras clave de longitud menor o igual a 1 para evitar falsos positivos con letras individuales
+        # Filtramos palabras clave de longitud menor o igual a 1 para evitar falsos positivos
         palabras_clave_filtradas = [pc for pc in palabras_clave if len(pc) > 1]
         
         for p in productos_disponibles:
@@ -346,8 +383,7 @@ def procesar_consulta(consulta):
             palabras_producto = re.split(r'\W+', p_lower)
             
             if contiene_tema_corporativo:
-                # Si la pregunta se refiere a temas corporativos (ej. valores, clientes, políticas, estacionamiento),
-                # NO permitimos que palabras del vocabulario corporativo gatillen coincidencia con el inventario.
+                # Si la pregunta es corporativa, omitimos búsquedas basadas en palabras corporativas en el inventario
                 match_exacto = False
                 for pc in palabras_clave_filtradas:
                     if pc in palabras_corporativas:
