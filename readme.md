@@ -40,8 +40,7 @@ La aplicación se encuentra actualmente desplegada y disponible para el público
 
 La prolijidad del proyecto se refleja en la organización limpia de sus directorios:
 
-
-
+```
 agente-mercado-central/
 ├── app.py                  # Código fuente principal de la aplicación Gradio
 ├── requirements.txt        # Librerías y dependencias (optimizado para CPU)
@@ -55,7 +54,7 @@ agente-mercado-central/
 └── img/                    # Capturas de pantalla para la documentación
 ├── screenshot_panel.jpg
 └── screenshot_respuesta.jpg
-
+```
 
 ## 📜 Historial de Evolución (Control de Versiones)
 
