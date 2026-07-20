@@ -54,13 +54,14 @@ documentos_extraidos = []
 columna_producto_real = None  # Almacena el nombre dinámico de la columna de productos encontrada
 
 # Diccionario exhaustivo de palabras vacías (Stop Words) en español para limpiar consultas de inventario
+# Se han removido "valor" y "valores" de este diccionario para evitar descartar consultas corporativas
 STOP_WORDS_SPANISH = {
     "y", "o", "u", "e", "de", "del", "con", "para", "por", "en", "sin", "sobre", 
     "el", "la", "los", "las", "un", "una", "unos", "unas", "su", "sus", "tu", "tus", 
     "mi", "mis", "este", "esta", "estos", "estas", "ese", "esa", "esos", "esas",
     "que", "cual", "cuales", "quien", "quienes", "como", "cómo", "donde", "dónde",
     "cuando", "cuándo", "cuanto", "cuánto", "precio", "precios", "costo", "costos", 
-    "valor", "valores", "stock", "existencia", "existencias", "cantidad", "cantidades",
+    "stock", "existencia", "existencias", "cantidad", "cantidades",
     "ubicacion", "ubicación", "pasillo", "deposito", "depósito", "gondola", "góndola",
     "lista", "listado", "ver", "mostrar", "buscar", "consultar", "traer", "obtener",
     "saber", "conocer", "detalle", "detalles", "informacion", "información", "tipo", "tipos"
@@ -236,7 +237,8 @@ def inyectar_datos_de_respaldo(nombre_archivo):
         ],
         "Politica de ATC.pdf": [
             "La política de atención al cliente (ATC) del Mercado Central determina que cualquier solicitud de cambio o devolución de productos defectuosos de fábrica debe gestionarse dentro de las primeras 24 horas posteriores a la compra, presenting el ticket físico original.",
-            "Los medios de pago autorizados en los puntos de venta habilitados incluyen efectivo en moneda de curso legal (guaraníes), tarjetas de crédito y débito de procesadoras autorizadas, y pagos unificados por código QR bancario."
+            "Los medios de pago autorizados en los puntos de venta habilitados incluyen efectivo en moneda de curso legal (guaraníes), tarjetas de crédito y débito de procesadoras autorizadas, y pagos unificados por código QR bancario.",
+            "1.4 Valores Orientados al Cliente\n• Honestidad: Precios claros, políticas transparentes, sin sorpresas desagradables.\n• Respeto: Cada cliente es tratado con la dignidad que merece, sin importar el monto de su compra ni la hora de su visita.\n• Calidez: La atención en Mercado Central 24h lleva el trato cercano y hospitalario que caracteriza a la cultura mexicana.\n• Compromiso: Respondemos por nuestros productos y nuestro servicio. Si algo no está bien, lo corregimos sin demora.\n• Innovación: Buscamos constantemente mejorar la experiencia del cliente a través de tecnología, capacitación y escucha activa.\n• Sustentabilidad: Operamos con conciencia del impacto ambiental y social de nuestras decisiones."
         ],
         "Reglamento_Interno-Proc_Operativos.pdf": [
             "Es una directiva obligatoria para todo el personal operativo de piso presentarse a su jornada laboral vistiendo el uniforme reglamentario completo, calzado de seguridad con puntera reforzada y portar en el pecho la credencial de identidad visible.",
@@ -281,7 +283,7 @@ def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None
         if coincide_producto and sustantivos_productos:
             contiene_sustantivo_real = any(noun in chunk_norm for noun in sustantivos_productos)
             if not contiene_sustantivo_real:
-                continue  # Ignora este párrafo ajeno (ej: descarta "pantalón blanco" o "reestructura integral" si buscábamos arroz)
+                continue  # Ignora este párrafo ajeno (ej: descarta "pantalón blanco" si buscábamos arroz)
         
         # BOOST POR PALABRAS CLAVE: Si hay coincidencia léxica exacta en consultas de alta precisión
         score_final = score.item()
@@ -291,6 +293,11 @@ def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None
             if "destinatario" in chunk_norm or "destinatarios" in chunk_norm:
                 score_final += 0.45  # Impulso muy potente al fragmento exacto de destinatarios
         
+        # Incrementar prioridad masivamente para consultas de valores organizacionales
+        if "valor" in query_norm or "valores" in query_norm:
+            if "valores" in chunk_norm or "valores orientados" in chunk_norm:
+                score_final += 0.45  # Impulso muy potente al fragmento exacto de valores corporativos
+
         if "manual" in query_norm and "manual" in chunk_norm:
             score_final += 0.05
         if "proveedor" in query_norm or "proveedores" in query_norm:
@@ -359,7 +366,7 @@ def procesar_consulta(consulta, seleccion_previa=None):
         "pago", "pagos", "factura", "facturas", "facturacion", "horario", "horarios", 
         "estacionamiento", "atencion", "atc", "faq", "faqs", "reclamo", "reclamos", 
         "personal", "uniforme", "vestimenta", "limpieza", "limpiar", "quienes", 
-        "destinatarios", "objetivo", "dirigido", "compra", "compras"
+        "destinatarios", "objetivo", "dirigido", "compra", "compras", "valor", "valores"
     }
     coincide_manual_politicas = len(palabras_query.intersection(palabras_manual_politicas)) > 0
     
