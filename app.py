@@ -127,6 +127,7 @@ def inyectar_datos_de_respaldo(nombre_archivo):
             "¿El estacionamiento tiene costo dentro del predio? El ingreso y estacionamiento de vehículos particulares livianos es completamente gratuito durante las primeras 2 horas. Los transportistas de gran porte para carga y descarga abonan una tarifa fija reglamentada en la cabina del portón de entrada."
         ],
         "Manual_Proveedores-Politicas_Compra.pdf": [
+            "Los destinatarios de este manual de proveedores y políticas de compra abarcan a todos los abastecedores, productores directos, intermediarios comerciales y contratistas externos de insumos que deseen entablar operaciones comerciales con el Mercado Central.",
             "Los plazos de pago estándar para proveedores de productos secos y frescos están fijados para los días viernes de cada semana, con una acreditación estimada a los 30 días corridos posteriores a la recepción de la factura comercial debidamente aprobada.",
             "La recepción de mercadería y control de calidad se realiza exclusivamente de lunes a sábados en la dársena de cargas número 3, en el rango horario de 06:00 a 12:00 hs. Se requiere solicitar turno previamente en el portal oficial de compras."
         ],
@@ -151,7 +152,7 @@ cargar_base_de_conocimiento()
 
 
 # --- 4. MOTOR DE BÚSQUEDA SEMÁNTICA LOCAL (Hugging Face) ---
-def buscar_en_pdfs(consulta, umbral=0.35):
+def buscar_en_pdfs(consulta, umbral=0.32):
     """Busca coincidencias en los documentos PDF con un umbral de relevancia dinámico."""
     if not documentos_extraidos:
         return []
@@ -203,16 +204,14 @@ def procesar_consulta(consulta, seleccion_previa=None):
             p_lower = p.lower()
             
             # Condición 1: El nombre completo del producto se encuentra citado en la pregunta del usuario
-            # Ej: Consulta "quiero ver el precio de Arroz tipo 1" -> coincide con "Arroz tipo 1"
             if p_lower in consulta_limpia:
                 coincidencias.append(p)
                 continue
             
             # Condición 2: Alguna palabra clave de alta relevancia del producto se encuentra en la consulta
-            # Ej: Consulta "Arroz y sus precios" -> coincide con "Arroz tipo 1", "Arroz tipo 2", etc.
             tokens_producto = [t.strip(",.!?();:").lower() for t in p_lower.split()]
             # Excluimos palabras vacías comunes para evitar falsos positivos
-            stop_words = {"de", "del", "el", "la", "en", "para", "un", "una", "con", "y", "tipo", "g", "kg", "ml", "1l", "500g", "1kg"}
+            stop_words = {"de", "del", "el", "la", "en", "para", "un", "una", "con", "y", "tipo", "g", "kg", "ml", "1l", "500g", "1kg", "sus", "precios", "precio"}
             tokens_clave = [t for t in tokens_producto if t not in stop_words]
             
             if any(t in palabras_consulta for t in tokens_clave):
@@ -244,11 +243,11 @@ def procesar_consulta(consulta, seleccion_previa=None):
             <h3 style="color: #2c3e50; border-bottom: 2px solid #e67e22; padding-bottom: 5px;">📦 Información de Inventario</h3>
             <table style="width:100%; border-collapse: collapse; font-family: sans-serif; text-align: left; background-color: #fafafa;">
                 <thead>
-                    <tr style="background-color: #34495e; color: white;">
+                    <tr style="background-color: #34495e;">
         """
-        # Cabeceras dinámicas basadas en tu Excel
+        # Cabeceras dinámicas basadas en tu Excel con fuente explícitamente blanca (color: white;)
         for col in resultado_inv.columns:
-            html_inventario += f'<th style="padding: 10px; border: 1px solid #ddd;">{col}</th>'
+            html_inventario += f'<th style="padding: 10px; border: 1px solid #ddd; color: white; font-weight: bold;">{col}</th>'
             
         html_inventario += """
                     </tr>
@@ -301,8 +300,8 @@ def procesar_consulta(consulta, seleccion_previa=None):
             <table style="width:100%; border-collapse: collapse; font-family: sans-serif; text-align: left; background-color: #fafafa;">
                 <thead>
                     <tr style="background-color: #2c3e50; color: white;">
-                        <th style="padding: 10px; border: 1px solid #ddd; width: 30%;">Documento Fuente (.pdf)</th>
-                        <th style="padding: 10px; border: 1px solid #ddd; width: 70%;">Contenido Extractado</th>
+                        <th style="padding: 10px; border: 1px solid #ddd; width: 30%; color: white;">Documento Fuente (.pdf)</th>
+                        <th style="padding: 10px; border: 1px solid #ddd; width: 70%; color: white;">Contenido Extractado</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -374,16 +373,17 @@ with gr.Blocks(title="Agente IA - Mercado Central 24 Hs.") as demo:
         value="<div style='color: #7f8c8d; text-align: center; padding: 40px; font-style: italic; font-family: sans-serif;'>Los resultados de tu búsqueda aparecerán en este panel de manera estructurada y prolija.</div>"
     )
 
-    def manejar_interaccion(texto, seleccion):
-        consulta_final = seleccion if seleccion else texto
-        if not consulta_final:
+    # Separación lógica del flujo de eventos: Evita arrastrar variables antiguas del selector de radio
+    def buscar_por_texto(texto):
+        """Maneja las búsquedas ingresadas directamente en la caja de texto."""
+        if not texto or not texto.strip():
             return (
                 "<p style='color: #e74c3c; font-weight: bold; font-family: sans-serif;'>Por favor, escribe una pregunta válida.</p>", 
-                gr.update(visible=False, choices=[]), 
+                gr.update(visible=False, choices=[], value=None), 
                 gr.update(visible=False)
             )
         
-        res = procesar_consulta(consulta_final)
+        res = procesar_consulta(texto.strip())
         
         if res["tipo"] == "multiples_opciones":
             return (
@@ -394,24 +394,40 @@ with gr.Blocks(title="Agente IA - Mercado Central 24 Hs.") as demo:
         else:
             return (
                 res["html"], 
-                gr.update(visible=False, choices=[]), 
+                gr.update(visible=False, choices=[], value=None), # 'value=None' previene que Gradio lance error al vaciar 'choices'
                 gr.update(visible=False)
             )
 
-    # Registro de disparadores de interacción
+    def buscar_por_seleccion(seleccion):
+        """Maneja las búsquedas cuando el usuario confirma una de las opciones del control de Radio."""
+        if not seleccion:
+            return (
+                "<p style='color: #e74c3c; font-weight: bold; font-family: sans-serif;'>Por favor, selecciona una opción.</p>", 
+                gr.update(visible=False, choices=[], value=None), 
+                gr.update(visible=False)
+            )
+        
+        res = procesar_consulta(seleccion)
+        return (
+            res["html"], 
+            gr.update(visible=False, choices=[], value=None), 
+            gr.update(visible=False)
+        )
+
+    # Registro de disparadores de interacción con flujos independientes
     btn_buscar.click(
-        fn=manejar_interaccion, 
-        inputs=[input_txt, selector_multiples], 
+        fn=buscar_por_texto, 
+        inputs=[input_txt], 
         outputs=[output_html, selector_multiples, btn_confirmar_seleccion]
     )
     input_txt.submit(
-        fn=manejar_interaccion, 
-        inputs=[input_txt, selector_multiples], 
+        fn=buscar_por_texto, 
+        inputs=[input_txt], 
         outputs=[output_html, selector_multiples, btn_confirmar_seleccion]
     )
     btn_confirmar_seleccion.click(
-        fn=manejar_interaccion, 
-        inputs=[input_txt, selector_multiples], 
+        fn=buscar_por_seleccion, 
+        inputs=[selector_multiples], 
         outputs=[output_html, selector_multiples, btn_confirmar_seleccion]
     )
 
