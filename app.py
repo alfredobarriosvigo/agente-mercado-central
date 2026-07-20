@@ -238,9 +238,10 @@ def inyectar_datos_de_respaldo(nombre_archivo):
         "Politica de ATC.pdf": [
             "La política de atención al cliente (ATC) del Mercado Central determina que cualquier solicitud de cambio o devolución de productos defectuosos de fábrica debe gestionarse dentro de las primeras 24 horas posteriores a la compra, presenting el ticket físico original.",
             "Los medios de pago autorizados en los puntos de venta habilitados incluyen efectivo en moneda de curso legal (guaraníes), tarjetas de crédito y débito de procesadoras autorizadas, y pagos unificados por código QR bancario.",
-            "1.4 Valores Orientados al Cliente\n• Honestidad: Precios claros, políticas transparentes, sin sorpresas desagradables.\n• Respeto: Cada cliente es tratado con la dignidad que merece, sin importar el monto de su compra ni la hora de su visita.\n• Calidez: La atención en Mercado Central 24h lleva el trato cercano y hospitalario que caracteriza a la cultura mexicana.\n• Compromiso: Respondemos por nuestros productos y nuestro servicio. Si algo no está bien, lo corregimos sin demora.\n• Innovación: Buscamos constantemente mejorar la experiencia del cliente a través de tecnología, capacitación y escucha activa.\n• Sustentabilidad: Operamos con conciencia del impacto ambiental y social de nuestras decisiones."
+            "1.4 Valores Orientados al Cliente\n• Honestidad: Precios claros, políticas transparentes, sin sorpresas desagradables.\n• Respecto: Cada cliente es tratado con la dignidad que merece, sin importar el monto de su compra ni la hora de su visita.\n• Calidez: La atención en Mercado Central 24h lleva el trato cercano y hospitalario que caracteriza a la cultura mexicana.\n• Compromiso: Respondemos por nuestros productos y nuestro servicio. Si algo no está bien, lo corregimos sin demora.\n• Innovación: Buscamos constantemente mejorar la experiencia del cliente a través de tecnología, capacitación y escucha activa.\n• Sustentabilidad: Operamos con conciencia del impacto ambiental y social de nuestras decisiones."
         ],
         "Reglamento_Interno-Proc_Operativos.pdf": [
+            "2.2 Misión, Visión y Valores\nMisión:\nProveer a las familias de México y América Latina una experiencia de compra ininterrumpida, accesible y confiable, ofreciendo productos frescos, de alta calidad, a precios justos y con un servicio excepcional las 24 horas del día, los 365 días del año.",
             "Es una directiva obligatoria para todo el personal operativo de piso presentarse a su jornada laboral vistiendo el uniforme reglamentario completo, calzado de seguridad con puntera reforzada y portar en el pecho la credencial de identidad visible.",
             "Procedimiento preventivo para góndolas: Cada encargado de pasillo debe realizar la limpieza, ordenamiento físico y sanitización de las góndolas asignadas al inicio y al cierre de cada de sus turnos operativos."
         ]
@@ -290,6 +291,10 @@ def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None
         
         if "valor" in query_norm or "valores" in query_norm:
             if "valores orientados" in chunk_norm or "valores organizacionales" in chunk_norm or ("valores" in chunk_norm and ("honestidad" in chunk_norm or "calidez" in chunk_norm)):
+                score_final += 0.45
+
+        if "mision" in query_norm or "misión" in query_norm:
+            if "mision" in chunk_norm or "misión" in chunk_norm:
                 score_final += 0.45
 
         if "manual" in query_norm and "manual" in chunk_norm:
