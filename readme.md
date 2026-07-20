@@ -1,6 +1,6 @@
 # Agente de IA - Mercado Central 24 Hs 🚀
 
-Este proyecto es un **agente conversacional inteligente** diseñado para resolver de forma autónoma y semántica consultas de inventario, políticas de compra de proveedores, atención al cliente (ATC) y reglamentos internos para **Mercado Central 24 Hs**.
+Este proyecto es un **agente conversacional inteligente** diseñado para resolver de forma autónoma y semántica consultas de inventario, políticas de compra de proveedores, atención al cliente (ATC) y reglamentos internos para **Mercado Central 24 Hs**. Fué creado enteramente con Google Gemini, las modificaciones necesarias desde la primera versión hasta la última fueron solicitadas en lenguaje natural y probadas en un entonrno local antes de su despliegue final.
 
 La aplicación cuenta con una interfaz web interactiva y amigable montada sobre **Gradio**, y un motor híbrido de recuperación de información basado en procesamiento de lenguaje natural (NLP) semántico y consultas estructuadas de base de datos.
 
