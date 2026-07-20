@@ -80,12 +80,44 @@ def normalizar_texto(texto):
 
 
 def chunkear_texto_inteligente(texto):
-    """Segmenta el texto de PDFs de forma atómica respetando viñetas y títulos."""
-    lineas = [l.strip() for l in texto.split("\n") if l.strip()]
+    """Segmenta el texto de PDFs de forma atómica respetando viñetas, títulos y uniendo saltos de línea huérfanos."""
+    texto = texto.replace("\r\n", "\n")
+    lineas_crudas = [l.strip() for l in texto.split("\n") if l.strip()]
+    
+    if not lineas_crudas:
+        return []
+        
+    lineas_unidas = []
+    for i, linea in enumerate(lineas_crudas):
+        if i == 0:
+            lineas_unidas.append(linea)
+            continue
+            
+        anterior = lineas_unidas[-1]
+        es_vineta_actual = (
+            linea.startswith("•") or 
+            linea.startswith("-") or 
+            linea.startswith("*") or 
+            re.match(r"^\d+[\.\)]\s", linea)
+        )
+        
+        if es_vineta_actual:
+            # Si es una viñeta, inicia obligatoriamente una nueva línea
+            lineas_unidas.append(linea)
+        else:
+            # Si la línea anterior NO terminaba en un signo de puntuación fuerte y es lo bastante larga,
+            # significa que el texto simplemente continuó abajo por el ancho del PDF. ¡Las unimos!
+            termina_oracion = anterior.endswith(('.', ':', '?', '!', '"', '”'))
+            if not termina_oracion and len(anterior) > 15:
+                lineas_unidas[-1] = anterior + " " + linea
+            else:
+                lineas_unidas.append(linea)
+                
+    # Agrupar las líneas consolidadas en fragmentos de listas estructuradas
     chunks = []
     current_chunk = []
     
-    for linea in lineas:
+    for linea in lineas_unidas:
         es_vineta = (
             linea.startswith("•") or 
             linea.startswith("-") or 
