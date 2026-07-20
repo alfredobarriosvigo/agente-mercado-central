@@ -17,6 +17,7 @@ RUTAS_PDFS = {
 
 os.makedirs(CARPETA_DATOS, exist_ok=True)
 
+
 def crear_archivos_demo():
     """Genera archivos de prueba en la carpeta 'datos' para asegurar un primer arranque sin errores."""
     if not os.path.exists(RUTA_INVENTARIO):
@@ -41,12 +42,14 @@ def crear_archivos_demo():
 
 crear_archivos_demo()
 
+
 print("Cargando modelo de lenguaje local para similitud semántica...")
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
 df_inventario = pd.DataFrame()
 documentos_extraidos = []
 columna_producto_real = None
+
 
 def chunkear_texto_inteligente(texto):
     """
@@ -90,6 +93,7 @@ def chunkear_texto_inteligente(texto):
             chunks_limpios.append(c_strip)
             
     return chunks_limpios
+
 
 def cargar_base_de_conocimiento():
     global df_inventario, documentos_extraidos, columna_producto_real
@@ -149,8 +153,9 @@ def cargar_base_de_conocimiento():
             print(f"Error leyendo PDF {nombre_archivo} ({e}). Usando datos de respaldo.")
             inyectar_datos_de_respaldo(nombre_archivo)
 
+
 def inyectar_datos_de_respaldo(nombre_archivo):
-    """Inyecta textos de consulta estructurados si los PDFs están vacíos o corruptos o de respaldo."""
+    """Inyecta textos de consulta estructurados si los PDFs están vacíos o corruptos."""
     respaldo = {
         "FAQ.pdf": [
             "¿Cuáles son los horarios de atención al público general del Mercado Central? El mercado opera las 24 horas del día, los 365 días del año de forma ininterrumpida. Las oficinas de facturación y administración atienden de lunes a viernes de 08:00 a 17:00 hs.",
@@ -182,6 +187,7 @@ def inyectar_datos_de_respaldo(nombre_archivo):
 
 cargar_base_de_conocimiento()
 
+
 def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None):
     if not documentos_extraidos:
         return []
@@ -209,7 +215,9 @@ def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None
         
         # A. CONTROL DE CONTEXTO CRUZADO (ELIMINACIÓN DE FALSOS POSITIVOS DE INVENTARIO)
         if coincide_producto and sustantivos_productos:
-            # Si el usuario busca arroz, el fragmento de PDF obligatoriamente debe contener la palabra
+            # Si el usuario pregunta por un producto específico (ej. "arroz", "aceite"), 
+            # el PDF analizado DEBE contener explícitamente ese sustantivo.
+            # Si no lo contiene, se le aplica una penalización drástica para que no se mezcle con políticas de ATC ("Precios Claros")
             tiene_sustantivo = any(s in chunk_norm for s in sustantivos_productos)
             if not tiene_sustantivo:
                 score_final -= 0.85
@@ -264,7 +272,7 @@ def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None
                 
                 if consulta_es_costo_estacionamiento:
                     if es_politica_costo_estacionamiento:
-                        score_final += 1.50  # Boost masivo exclusivo para la respuesta esperada del FAQ
+                        score_final += 1.50  # Boost masivo exclusivo para la respuesta esperada
                     else:
                         score_final -= 0.80  # Penalización a menciones complementarias
                 else:
@@ -273,7 +281,7 @@ def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None
                     else:
                         score_final += 0.20
             else:
-                score_final -= 0.90  # Descarte absoluto de no-estacionamientos
+                score_final -= 0.90
                 
             if consulta_es_costo_estacionamiento:
                 es_vip_lealtad = any(term in chunk_norm for term in ["vip", "pesos central", "canje", "membresía", "puntos"])
@@ -310,6 +318,7 @@ def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None
         resultados_unicos = [r for r in resultados_unicos if r["score"] >= (mejor_score * 0.82)]
         
     return resultados_unicos[:3]
+
 
 def procesar_consulta(consulta):
     global columna_producto_real
@@ -379,16 +388,6 @@ def procesar_consulta(consulta):
                         break
                 
     coincidencias_agrupadas = sorted(list(set(coincidencias)))
-    
-    # CONTROL DE INTERFAZ MULTI-SELECCIÓN:
-    # Si encontramos múltiples productos y NO es un match exacto directo (ej: clic en el botón),
-    # devolvemos el tipo "multiples_opciones" de forma interactiva.
-    if not es_match_exacto and len(coincidencias_agrupadas) > 1:
-        return {
-            "tipo": "multiples_opciones",
-            "opciones": coincidencias_agrupadas,
-            "html": f"<p style='color: #d35400; font-weight: bold; font-family: sans-serif;'>🔍 Encontramos varias opciones de productos para '{consulta}'. Por favor, elija una de la lista:</p>"
-        }
     
     resultado_inv = pd.DataFrame()
     coincide_producto = False
@@ -483,6 +482,8 @@ def procesar_consulta(consulta):
         "html": html_inventario + html_pdfs
     }
 
+
+# --- 6. INTERFAZ DE GRADIO ---
 warm_theme = gr.themes.Default(
     primary_hue="orange",
     secondary_hue="amber",

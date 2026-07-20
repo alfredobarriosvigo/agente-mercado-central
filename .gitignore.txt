@@ -1,0 +1,20 @@
+# Entorno virtual de Python
+venv/
+env/
+ENV/
+
+# Archivos de caché de Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Llaves privadas y credenciales de seguridad (¡Muy Importante!)
+*.key
+*.pem
+*.pub
+ssh-key*
+
+# Archivos del sistema operativo
+.DS_Store
+Thumbs.db

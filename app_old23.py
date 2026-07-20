@@ -17,6 +17,8 @@ RUTAS_PDFS = {
 
 os.makedirs(CARPETA_DATOS, exist_ok=True)
 
+
+# --- 2. GENERACIÓN DE ARCHIVOS DEMO (Respaldo por si la carpeta está vacía) ---
 def crear_archivos_demo():
     """Genera archivos de prueba en la carpeta 'datos' para asegurar un primer arranque sin errores."""
     if not os.path.exists(RUTA_INVENTARIO):
@@ -41,12 +43,15 @@ def crear_archivos_demo():
 
 crear_archivos_demo()
 
+
+# --- 3. LECTURA Y PROCESAMIENTO INTELIGENTE DE ARCHIVOS ---
 print("Cargando modelo de lenguaje local para similitud semántica...")
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
 df_inventario = pd.DataFrame()
 documentos_extraidos = []
 columna_producto_real = None
+
 
 def chunkear_texto_inteligente(texto):
     """
@@ -57,14 +62,12 @@ def chunkear_texto_inteligente(texto):
     chunks = []
     buffer_actual = []
     
-    # Expresión regular para detectar subsecciones numéricas como 1.4, 2.2, etc. y preguntas
+    # Expresión regular para detectar subsecciones numéricas como 1.4, 2.2, etc.
     es_seccion = re.compile(r'^\d+\.\d+\s+[A-Z]')
     
     for i, linea in enumerate(lineas):
-        es_pregunta = (linea.startswith("¿") or linea.endswith("?"))
-        
-        # Si detectamos un cambio formal de subsección o pregunta, cerramos el bloque anterior
-        if (es_seccion.match(linea) or es_pregunta) and buffer_actual:
+        # Si detectamos un cambio formal de subsección, cerramos el bloque anterior e iniciamos uno nuevo
+        if es_seccion.match(linea) and buffer_actual:
             chunks.append(" ".join(buffer_actual))
             buffer_actual = []
             
@@ -90,6 +93,7 @@ def chunkear_texto_inteligente(texto):
             chunks_limpios.append(c_strip)
             
     return chunks_limpios
+
 
 def cargar_base_de_conocimiento():
     global df_inventario, documentos_extraidos, columna_producto_real
@@ -143,23 +147,22 @@ def cargar_base_de_conocimiento():
                         })
                 else:
                     inyectar_datos_de_respaldo(nombre_archivo)
-            else:
-                inyectar_datos_de_respaldo(nombre_archivo)
         except Exception as e:
             print(f"Error leyendo PDF {nombre_archivo} ({e}). Usando datos de respaldo.")
             inyectar_datos_de_respaldo(nombre_archivo)
 
+
 def inyectar_datos_de_respaldo(nombre_archivo):
-    """Inyecta textos de consulta estructurados si los PDFs están vacíos o corruptos o de respaldo."""
+    """Inyecta textos de consulta estructurados si los PDFs están vacíos o corruptos."""
     respaldo = {
         "FAQ.pdf": [
             "¿Cuáles son los horarios de atención al público general del Mercado Central? El mercado opera las 24 horas del día, los 365 días del año de forma ininterrumpida. Las oficinas de facturación y administración atienden de lunes a viernes de 08:00 a 17:00 hs.",
-            "¿El estacionamiento tiene algún costo para los clientes? Nuestros clientes disfrutan de estacionamiento gratuito durante las primeras 2 horas, siempre y cuando presenten un ticket de compra con consumo mínimo de $150 MXN (o su equivalente en moneda local según la sucursal) al momento de validar su boleto en el módulo de Atención a Clientes o en las máquinas de validación ubicadas en los accesos al estacionamiento. Transcurrido el periodo de cortesía, o en caso de no contar con ticket de compra válido, se aplicará la tarifa comercial vigente por hora o fracción, la cual está publicada en las pantallas y señales de los accesos vehiculares de cada unidad. Las tarifas pueden variar ligeramente entre sucursales según el municipio, alcaldía o ciudad donde se encuentren. Clientes registrados en el programa \"Cliente VIP Central\" con nivel Oro o Diamante gozan de hasta 4 horas de estacionamiento gratuito por visita. Para motocicletas y bicicletas, contamos con áreas designadas y gratuitas sin límite de tiempo, fomentando la movilidad sostenible.",
+            "¿El estacionamiento tiene costo dentro del predio? El ingreso y estacionamiento de vehículos particulares livianos es completamente gratuito durante las primeras 2 horas para todos los clientes que ingresen al supermercado. Los transportistas de gran porte para carga y descarga abonan una tarifa fija reglamentada en la cabina.",
             "¿Puedo calentar mis alimentos durante mi turno en las instalaciones de la empresa? Sí, todos los colaboradores cuentan con un comedor común equipado con hornos microondas y refrigeradores para el correcto almacenamiento de sus viandas durante su descanso programado."
         ],
         "Manual_Proveedores-Politicas_Compra.pdf": [
             "1.3 Objetivo del Manual y a Quién Va Dirigido, subsección: Destinatarios. El contenido de este manual de compras es de cumplimiento obligatorio para: \n• Proveedores actuales de Mercado Central 24h en México y en todos los países donde la empresa opera. \n• Candidatos a nuevos proveedores que deseen integrarse a nuestra base de suministro. \n• Personal interno del área de Compras, Almacén, Calidad y Finanzas que interactúa con proveedores. \n• Auditores internos y externos que revisen los procesos de abastecimiento.",
-            "La recepción de mercadería y control de calidad se realiza exclusivamente de lunes a sábados en la dársena de cargas número 3, en el rango de 06:00 a 12:00 hs. Se requiere solicitar turno previamente en el portal oficial de compras."
+            "La recepción de mercadería y control de calidad se realiza exclusivamente de lunes a sábados en la dársea de cargas número 3, en el rango de 06:00 a 12:00 hs. Se requiere solicitar turno previamente en el portal oficial de compras."
         ],
         "Politica de ATC.pdf": [
             "Para el año 2024, Mercado Central 24h opera con más de 85 sucursales entre México y Latinoamérica... 1.2 Misión Ofrecer a nuestras familias latinoamericanas una experiencia de compra de alta calidad... 1.3 Visión Ser la cadena de supermercados de mayor confianza...",
@@ -182,6 +185,8 @@ def inyectar_datos_de_respaldo(nombre_archivo):
 
 cargar_base_de_conocimiento()
 
+
+# --- 4. MOTOR DE BÚSQUEDA SEMÁNTICA LOCAL ---
 def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None):
     if not documentos_extraidos:
         return []
@@ -195,25 +200,17 @@ def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None
     resultados_filtrados = []
     query_norm = consulta.lower()
     
-    # Palabras clave de estacionamiento para segmentación contextual estricta
-    terminos_estacionar = ["estacionamiento", "estacionar", "parqueo", "cochera", "garaje"]
-    consulta_es_estacionamiento = any(term in query_norm for term in terminos_estacionar)
-    consulta_es_costo_estacionamiento = consulta_es_estacionamiento and any(
-        term in query_norm for term in ["costo", "precio", "pagar", "tarifa", "gratis", "gratuito", "cobro", "cobra", "cobran", "paga", "cuanto", "monto", "pesos", "mxn"]
-    )
-    
     for idx, score in enumerate(cosine_scores):
         chunk_original = documentos_extraidos[idx]["contenido"]
         chunk_norm = chunk_original.lower()
         score_final = float(score.item())
         
-        # A. CONTROL DE CONTEXTO CRUZADO (ELIMINACIÓN DE FALSOS POSITIVOS DE INVENTARIO)
+        # A. CONTROL DE CONTEXTO CRUZADO (FALSOS POSITIVOS DE INVENTARIO)
         if coincide_producto and sustantivos_productos:
-            # Si el usuario busca arroz, el fragmento de PDF obligatoriamente debe contener la palabra
             tiene_sustantivo = any(s in chunk_norm for s in sustantivos_productos)
-            if not tiene_sustantivo:
-                score_final -= 0.85
-
+            if ("blanco" in chunk_norm or "integral" in chunk_norm) and not tiene_sustantivo:
+                score_final -= 0.55
+                
         # B. SISTEMA DE REFUERZO DE RELEVANCIA (BOOSTING SELECCIONADO)
         # 1. Destinatarios del Manual de Proveedores
         if "destinatario" in query_norm or "destinatarios" in query_norm:
@@ -222,7 +219,7 @@ def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None
             else:
                 score_final -= 0.30
 
-        # 2. Valores Orientados al Clientes vs Valores Corporativos / Medidas Disciplinarias
+        # 2. Valores Orientados al Clientes vs Valores Corporativos Generales / Medidas Disciplinarias
         if "valor" in query_norm or "valores" in query_norm:
             if "cliente" in query_norm or "clientes" in query_norm:
                 es_valores_cliente_atc = ("valores orientados" in chunk_norm or 
@@ -232,7 +229,7 @@ def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None
                 if es_valores_cliente_atc and "sancion" not in chunk_norm and "robo" not in chunk_norm:
                     score_final += 0.50
                 else:
-                    score_final -= 0.45
+                    score_final -= 0.35
             else:
                 if "valores corporativos" in chunk_norm or "valores de la empresa" in chunk_norm:
                     score_final += 0.45
@@ -248,40 +245,6 @@ def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None
                     score_final -= 0.10
             else:
                 score_final -= 0.20
-
-        # 4. Control de Contexto Estricto y Hermético para Estacionamiento
-        if consulta_es_estacionamiento:
-            es_chunk_estacionamiento = any(term in chunk_norm for term in terminos_estacionar)
-            
-            if es_chunk_estacionamiento:
-                es_politica_costo_estacionamiento = (
-                    "primeras 2 horas" in chunk_norm or 
-                    "consumo mínimo" in chunk_norm or 
-                    "tarifa comercial" in chunk_norm or 
-                    "validar su boleto" in chunk_norm or 
-                    "costo para los clientes" in chunk_norm
-                )
-                
-                if consulta_es_costo_estacionamiento:
-                    if es_politica_costo_estacionamiento:
-                        score_final += 1.50  # Boost masivo exclusivo para la respuesta esperada del FAQ
-                    else:
-                        score_final -= 0.80  # Penalización a menciones complementarias
-                else:
-                    if es_politica_costo_estacionamiento:
-                        score_final += 0.85
-                    else:
-                        score_final += 0.20
-            else:
-                score_final -= 0.90  # Descarte absoluto de no-estacionamientos
-                
-            if consulta_es_costo_estacionamiento:
-                es_vip_lealtad = any(term in chunk_norm for term in ["vip", "pesos central", "canje", "membresía", "puntos"])
-                es_accesibilidad = any(term in chunk_norm for term in ["accesibilidad", "rampas", "pasillos", "braille", "discapacidad"])
-                es_seguridad = any(term in chunk_norm for term in ["inseguridad", "robo", "amenaza", "cctv", "911", "emergencia"])
-                
-                if es_vip_lealtad or es_accesibilidad or es_seguridad:
-                    score_final -= 0.80
 
         # C. FILTRADO POR UMBRAL DE RELEVANCIA
         umbral_limite = 0.45 if coincide_producto else 0.32
@@ -311,38 +274,42 @@ def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None
         
     return resultados_unicos[:3]
 
+
+# --- 5. LÓGICA DE PROCESAMIENTO Y RESPUESTAS ---
 def procesar_consulta(consulta):
     global columna_producto_real
     consulta_limpia = consulta.strip().lower()
     
+    # Ampliamos la lista de stop words para evitar falsos positivos con preposiciones o conectores de una letra como "a"
     stop_words = {
         "y", "sus", "de", "con", "la", "el", "los", "las", "un", "una", "unos", "unas", 
         "para", "por", "en", "sobre", "del", "al", "que", "es", "son", "cuál", "cual", "cuales", "cuáles",
         "ver", "buscar", "precio", "precios", "stock", "inventario", "mostrar", "qué", "que",
         "a", "o", "u", "e", "este", "esta", "estos", "estas", "ese", "esa", "esos", "esas",
         "aquello", "aquella", "como", "cómo", "dónde", "donde", "cuando", "cuándo", "quién", "quien",
-        "nosotros", "ellos", "usted", "ustedes", "mi", "mis", "tu", "tus", "su", "sus", "debe", "deber",
-        "tienen", "tiene", "tienes", "algun", "algún", "algunos", "algunas", "detallados", "detalle", "conocer"
+        "nosotros", "ellos", "usted", "ustedes", "mi", "mis", "tu", "tus", "su", "sus"
     }
     
+    # Palabras clave orientadas exclusivamente a políticas, manuales u organización
     palabras_corporativas = {
         "valor", "valores", "misión", "mision", "visión", "vision", "política", "politica", 
         "políticas", "politicas", "manual", "reglamento", "procedimiento", "procedimientos", 
         "atc", "atención", "atencion", "cliente", "clientes", "proveedor", "proveedores", 
         "compra", "compras", "horario", "horarios", "estacionamiento", "estacionamientos",
         "sanción", "sanciones", "falta", "faltas", "medida", "medidas", "disciplinaria", "disciplinarias",
-        "faq", "faqs", "pregunta", "preguntas", "estacionar", "parqueo", "cochera"
+        "faq", "faqs", "pregunta", "preguntas"
     }
     
     tokens = [t for t in re.split(r'\W+', consulta_limpia) if t]
     palabras_clave = [t for t in tokens if t not in stop_words]
     
+    # Determinamos si la consulta se refiere a políticas de la organización
     contiene_tema_corporativo = any(pc in palabras_corporativas for pc in palabras_clave)
     
     coincidencias = []
     inventario_habilitado = not df_inventario.empty and columna_producto_real is not None
     
-    # 1. Comprobación de coincidencia exacta primero
+    # 1. Comprobación de coincidencia exacta primero (evita bucles infinitos en selectores múltiples)
     es_match_exacto = False
     if inventario_habilitado:
         productos_disponibles = df_inventario[columna_producto_real].astype(str).tolist()
@@ -355,6 +322,8 @@ def procesar_consulta(consulta):
     # 2. Búsqueda por palabras clave solo si no hay una coincidencia exacta directa
     if not es_match_exacto and inventario_habilitado and palabras_clave:
         productos_disponibles = df_inventario[columna_producto_real].astype(str).tolist()
+        
+        # Filtramos palabras clave de longitud menor o igual a 1 para evitar falsos positivos con letras individuales
         palabras_clave_filtradas = [pc for pc in palabras_clave if len(pc) > 1]
         
         for p in productos_disponibles:
@@ -362,17 +331,20 @@ def procesar_consulta(consulta):
             palabras_producto = re.split(r'\W+', p_lower)
             
             if contiene_tema_corporativo:
-                # Omitimos búsquedas basadas en palabras corporativas para el inventario
+                # Si la pregunta se refiere a temas corporativos (ej. valores, clientes, políticas),
+                # NO permitimos que palabras del vocabulario corporativo gatillen coincidencia con el inventario.
+                # Solamente buscaríamos coincidencias si hay una palabra de producto explícita y su coincidencia es exacta.
                 match_exacto = False
                 for pc in palabras_clave_filtradas:
                     if pc in palabras_corporativas:
-                        continue
+                        continue  # Se omite 'valores', 'clientes', etc., en la búsqueda de productos
                     if pc in palabras_producto:
                         match_exacto = True
                         break
                 if match_exacto:
                     coincidencias.append(p)
             else:
+                # Búsqueda de inventario estándar utilizando límites de palabras (evita substring parcial erróneo)
                 for pc in palabras_clave_filtradas:
                     if any(pc == pp or pp.startswith(pc) for pp in palabras_producto if len(pp) >= len(pc)):
                         coincidencias.append(p)
@@ -380,10 +352,7 @@ def procesar_consulta(consulta):
                 
     coincidencias_agrupadas = sorted(list(set(coincidencias)))
     
-    # CONTROL DE INTERFAZ MULTI-SELECCIÓN:
-    # Si encontramos múltiples productos y NO es un match exacto directo (ej: clic en el botón),
-    # devolvemos el tipo "multiples_opciones" de forma interactiva.
-    if not es_match_exacto and len(coincidencias_agrupadas) > 1:
+    if len(coincidencias_agrupadas) > 1:
         return {
             "tipo": "multiples_opciones",
             "opciones": coincidencias_agrupadas,
@@ -394,14 +363,14 @@ def procesar_consulta(consulta):
     coincide_producto = False
     sustantivos_productos_coincidentes = []
     
-    if coincidencias_agrupadas:
-        resultado_inv = df_inventario[df_inventario[columna_producto_real].isin(coincidencias_agrupadas)]
+    if len(coincidencias_agrupadas) == 1:
+        resultado_inv = df_inventario[df_inventario[columna_producto_real] == coincidencias_agrupadas[0]]
         coincide_producto = True
-        for p in coincidencias_agrupadas:
-            partes = p.split()
-            if partes:
-                sustantivos_productos_coincidentes.append(partes[0].lower())
-        sustantivos_productos_coincidentes = list(set(sustantivos_productos_coincidentes))
+        sustantivos_productos_coincidentes = [coincidencias_agrupadas[0].split()[0].lower()]
+    elif inventario_habilitado and any(p.lower() == consulta_limpia for p in df_inventario[columna_producto_real].astype(str).str.lower().tolist()):
+        resultado_inv = df_inventario[df_inventario[columna_producto_real].astype(str).str.lower() == consulta_limpia]
+        coincide_producto = True
+        sustantivos_productos_coincidentes = [consulta_limpia.split()[0]]
 
     # Armado dinámico de la planilla de inventario
     html_inventario = ""
@@ -483,6 +452,8 @@ def procesar_consulta(consulta):
         "html": html_inventario + html_pdfs
     }
 
+
+# --- 6. INTERFAZ DE GRADIO ---
 warm_theme = gr.themes.Default(
     primary_hue="orange",
     secondary_hue="amber",

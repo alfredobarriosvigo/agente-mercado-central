@@ -17,6 +17,8 @@ RUTAS_PDFS = {
 
 os.makedirs(CARPETA_DATOS, exist_ok=True)
 
+
+# --- 2. GENERACIÓN DE ARCHIVOS DEMO (Respaldo por si la carpeta está vacía) ---
 def crear_archivos_demo():
     """Genera archivos de prueba en la carpeta 'datos' para asegurar un primer arranque sin errores."""
     if not os.path.exists(RUTA_INVENTARIO):
@@ -41,6 +43,8 @@ def crear_archivos_demo():
 
 crear_archivos_demo()
 
+
+# --- 3. LECTURA Y PROCESAMIENTO INTELIGENTE DE ARCHIVOS ---
 print("Cargando modelo de lenguaje local para similitud semántica...")
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
@@ -48,48 +52,54 @@ df_inventario = pd.DataFrame()
 documentos_extraidos = []
 columna_producto_real = None
 
+
 def chunkear_texto_inteligente(texto):
     """
     Segmenta el texto de manera semántica y jerárquica.
-    Une líneas de listas continuas sin romper viñetas e identifica cambios drásticos de subsección.
+    Detecta preguntas (que inician con ¿ o contienen ?) y títulos de sección para iniciar nuevos chunks de forma limpia.
     """
     lineas = [l.strip() for l in texto.split("\n") if l.strip()]
     chunks = []
     buffer_actual = []
     
-    # Expresión regular para detectar subsecciones numéricas como 1.4, 2.2, etc. y preguntas
-    es_seccion = re.compile(r'^\d+\.\d+\s+[A-Z]')
+    # Expresiones regulares para detectar cortes lógicos naturales
+    es_seccion = re.compile(r'^(\d+\.\d+|\d+\.\d+\.\d+)\s+[A-Z]')
+    es_seccion_palabra = re.compile(r'^(SECCIÓN|CAPÍTULO|TITULO|PROCESO|POLÍTICA|REGLA)\s+\d+', re.IGNORECASE)
     
-    for i, linea in enumerate(lineas):
-        es_pregunta = (linea.startswith("¿") or linea.endswith("?"))
+    for linea in lineas:
+        # Detectar si la línea representa una nueva pregunta o sección formal
+        es_pregunta = (linea.startswith("¿") or 
+                       linea.endswith("?") or 
+                       (linea.lower().startswith("preg") and ":" in linea))
         
-        # Si detectamos un cambio formal de subsección o pregunta, cerramos el bloque anterior
-        if (es_seccion.match(linea) or es_pregunta) and buffer_actual:
+        # Si detectamos un cambio de sección o una nueva pregunta, guardamos el bloque anterior
+        if (es_seccion.match(linea) or es_seccion_palabra.match(linea) or es_pregunta) and buffer_actual:
             chunks.append(" ".join(buffer_actual))
             buffer_actual = []
             
-        # Si la línea anterior termina sin signo de puntuación y la actual no empieza con viñeta, las fusionamos
+        # Unimos líneas continuas respetando viñetas y puntuaciones
         if buffer_actual and not buffer_actual[-1].endswith(('.', ':', ';', '?')) and not linea.startswith(('•', '-', '*', '1.', '2.', '3.', '4.', '5.')):
             buffer_actual[-1] += " " + linea
         else:
             buffer_actual.append(linea)
             
-        # Controlamos que los bloques no crezcan demasiado en líneas sueltas
-        if len(buffer_actual) >= 18:
+        # Controlamos que los bloques sin divisiones naturales no excedan un tamaño prudente
+        if len(buffer_actual) >= 15:
             chunks.append(" ".join(buffer_actual))
             buffer_actual = []
             
     if buffer_actual:
         chunks.append(" ".join(buffer_actual))
         
-    # Limpiamos y eliminamos fragmentos que sean extremadamente cortos
+    # Filtrado y limpieza final de fragmentos muy cortos
     chunks_limpios = []
     for c in chunks:
         c_strip = c.strip()
-        if len(c_strip) > 40:
+        if len(c_strip) > 30:
             chunks_limpios.append(c_strip)
             
     return chunks_limpios
+
 
 def cargar_base_de_conocimiento():
     global df_inventario, documentos_extraidos, columna_producto_real
@@ -149,8 +159,9 @@ def cargar_base_de_conocimiento():
             print(f"Error leyendo PDF {nombre_archivo} ({e}). Usando datos de respaldo.")
             inyectar_datos_de_respaldo(nombre_archivo)
 
+
 def inyectar_datos_de_respaldo(nombre_archivo):
-    """Inyecta textos de consulta estructurados si los PDFs están vacíos o corruptos o de respaldo."""
+    """Inyecta textos de consulta estructurados si los PDFs están vacíos, no existen o están corruptos."""
     respaldo = {
         "FAQ.pdf": [
             "¿Cuáles son los horarios de atención al público general del Mercado Central? El mercado opera las 24 horas del día, los 365 días del año de forma ininterrumpida. Las oficinas de facturación y administración atienden de lunes a viernes de 08:00 a 17:00 hs.",
@@ -182,6 +193,8 @@ def inyectar_datos_de_respaldo(nombre_archivo):
 
 cargar_base_de_conocimiento()
 
+
+# --- 4. MOTOR DE BÚSQUEDA SEMÁNTICA LOCAL ---
 def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None):
     if not documentos_extraidos:
         return []
@@ -207,13 +220,12 @@ def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None
         chunk_norm = chunk_original.lower()
         score_final = float(score.item())
         
-        # A. CONTROL DE CONTEXTO CRUZADO (ELIMINACIÓN DE FALSOS POSITIVOS DE INVENTARIO)
+        # A. CONTROL DE CONTEXTO CRUZADO (FALSOS POSITIVOS DE INVENTARIO)
         if coincide_producto and sustantivos_productos:
-            # Si el usuario busca arroz, el fragmento de PDF obligatoriamente debe contener la palabra
             tiene_sustantivo = any(s in chunk_norm for s in sustantivos_productos)
-            if not tiene_sustantivo:
-                score_final -= 0.85
-
+            if ("blanco" in chunk_norm or "integral" in chunk_norm) and not tiene_sustantivo:
+                score_final -= 0.55
+                
         # B. SISTEMA DE REFUERZO DE RELEVANCIA (BOOSTING SELECCIONADO)
         # 1. Destinatarios del Manual de Proveedores
         if "destinatario" in query_norm or "destinatarios" in query_norm:
@@ -222,7 +234,7 @@ def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None
             else:
                 score_final -= 0.30
 
-        # 2. Valores Orientados al Clientes vs Valores Corporativos / Medidas Disciplinarias
+        # 2. Valores Orientados al Clientes vs Valores Corporativos Generales / Medidas Disciplinarias
         if "valor" in query_norm or "valores" in query_norm:
             if "cliente" in query_norm or "clientes" in query_norm:
                 es_valores_cliente_atc = ("valores orientados" in chunk_norm or 
@@ -232,7 +244,7 @@ def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None
                 if es_valores_cliente_atc and "sancion" not in chunk_norm and "robo" not in chunk_norm:
                     score_final += 0.50
                 else:
-                    score_final -= 0.45
+                    score_final -= 0.35
             else:
                 if "valores corporativos" in chunk_norm or "valores de la empresa" in chunk_norm:
                     score_final += 0.45
@@ -249,11 +261,12 @@ def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None
             else:
                 score_final -= 0.20
 
-        # 4. Control de Contexto Estricto y Hermético para Estacionamiento
+        # 4. Control de Contexto Estricto y Hermético para Estacionamiento (CORRECCIÓN DE ERROR CRÍTICO)
         if consulta_es_estacionamiento:
             es_chunk_estacionamiento = any(term in chunk_norm for term in terminos_estacionar)
             
             if es_chunk_estacionamiento:
+                # Determinar si es la respuesta de tarifas oficial o menciones incidentales
                 es_politica_costo_estacionamiento = (
                     "primeras 2 horas" in chunk_norm or 
                     "consumo mínimo" in chunk_norm or 
@@ -264,17 +277,19 @@ def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None
                 
                 if consulta_es_costo_estacionamiento:
                     if es_politica_costo_estacionamiento:
-                        score_final += 1.50  # Boost masivo exclusivo para la respuesta esperada del FAQ
+                        score_final += 1.50  # Boost masivo exclusivo para la respuesta esperada
                     else:
-                        score_final -= 0.80  # Penalización a menciones complementarias
+                        score_final -= 0.60  # Penalización a menciones complementarias (como accesibilidad o VIP)
                 else:
                     if es_politica_costo_estacionamiento:
                         score_final += 0.85
                     else:
                         score_final += 0.20
             else:
-                score_final -= 0.90  # Descarte absoluto de no-estacionamientos
+                # Descarte inmediato y absoluto si el chunk no tiene relación con estacionar
+                score_final -= 0.90
                 
+            # Penalizar de forma proactiva si es pregunta de costo y trata sobre VIP, accesibilidad o seguridad
             if consulta_es_costo_estacionamiento:
                 es_vip_lealtad = any(term in chunk_norm for term in ["vip", "pesos central", "canje", "membresía", "puntos"])
                 es_accesibilidad = any(term in chunk_norm for term in ["accesibilidad", "rampas", "pasillos", "braille", "discapacidad"])
@@ -311,20 +326,23 @@ def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None
         
     return resultados_unicos[:3]
 
+
+# --- 5. LÓGICA DE PROCESAMIENTO Y RESPUESTAS ---
 def procesar_consulta(consulta):
     global columna_producto_real
     consulta_limpia = consulta.strip().lower()
     
+    # Ampliamos la lista de stop words para evitar falsos positivos con conectores e interjecciones comunes
     stop_words = {
         "y", "sus", "de", "con", "la", "el", "los", "las", "un", "una", "unos", "unas", 
         "para", "por", "en", "sobre", "del", "al", "que", "es", "son", "cuál", "cual", "cuales", "cuáles",
         "ver", "buscar", "precio", "precios", "stock", "inventario", "mostrar", "qué", "que",
         "a", "o", "u", "e", "este", "esta", "estos", "estas", "ese", "esa", "esos", "esas",
         "aquello", "aquella", "como", "cómo", "dónde", "donde", "cuando", "cuándo", "quién", "quien",
-        "nosotros", "ellos", "usted", "ustedes", "mi", "mis", "tu", "tus", "su", "sus", "debe", "deber",
-        "tienen", "tiene", "tienes", "algun", "algún", "algunos", "algunas", "detallados", "detalle", "conocer"
+        "nosotros", "ellos", "usted", "ustedes", "mi", "mis", "tu", "tus", "su", "sus", "debe", "deber"
     }
     
+    # Palabras clave orientadas exclusivamente a políticas, manuales u organización
     palabras_corporativas = {
         "valor", "valores", "misión", "mision", "visión", "vision", "política", "politica", 
         "políticas", "politicas", "manual", "reglamento", "procedimiento", "procedimientos", 
@@ -337,6 +355,7 @@ def procesar_consulta(consulta):
     tokens = [t for t in re.split(r'\W+', consulta_limpia) if t]
     palabras_clave = [t for t in tokens if t not in stop_words]
     
+    # Determinamos si la consulta se refiere a políticas de la organización
     contiene_tema_corporativo = any(pc in palabras_corporativas for pc in palabras_clave)
     
     coincidencias = []
@@ -355,6 +374,8 @@ def procesar_consulta(consulta):
     # 2. Búsqueda por palabras clave solo si no hay una coincidencia exacta directa
     if not es_match_exacto and inventario_habilitado and palabras_clave:
         productos_disponibles = df_inventario[columna_producto_real].astype(str).tolist()
+        
+        # Filtramos palabras clave de longitud menor o igual a 1 para evitar falsos positivos
         palabras_clave_filtradas = [pc for pc in palabras_clave if len(pc) > 1]
         
         for p in productos_disponibles:
@@ -362,17 +383,18 @@ def procesar_consulta(consulta):
             palabras_producto = re.split(r'\W+', p_lower)
             
             if contiene_tema_corporativo:
-                # Omitimos búsquedas basadas en palabras corporativas para el inventario
+                # Si la pregunta es corporativa, omitimos búsquedas basadas en palabras corporativas en el inventario
                 match_exacto = False
                 for pc in palabras_clave_filtradas:
                     if pc in palabras_corporativas:
-                        continue
+                        continue  # Se omite 'valores', 'clientes', 'estacionamiento' en la búsqueda de productos
                     if pc in palabras_producto:
                         match_exacto = True
                         break
                 if match_exacto:
                     coincidencias.append(p)
             else:
+                # Búsqueda de inventario estándar utilizando límites de palabras (evita substring parcial erróneo)
                 for pc in palabras_clave_filtradas:
                     if any(pc == pp or pp.startswith(pc) for pp in palabras_producto if len(pp) >= len(pc)):
                         coincidencias.append(p)
@@ -380,10 +402,7 @@ def procesar_consulta(consulta):
                 
     coincidencias_agrupadas = sorted(list(set(coincidencias)))
     
-    # CONTROL DE INTERFAZ MULTI-SELECCIÓN:
-    # Si encontramos múltiples productos y NO es un match exacto directo (ej: clic en el botón),
-    # devolvemos el tipo "multiples_opciones" de forma interactiva.
-    if not es_match_exacto and len(coincidencias_agrupadas) > 1:
+    if len(coincidencias_agrupadas) > 1:
         return {
             "tipo": "multiples_opciones",
             "opciones": coincidencias_agrupadas,
@@ -394,14 +413,15 @@ def procesar_consulta(consulta):
     coincide_producto = False
     sustantivos_productos_coincidentes = []
     
-    if coincidencias_agrupadas:
-        resultado_inv = df_inventario[df_inventario[columna_producto_real].isin(coincidencias_agrupadas)]
+    if len(coincidencias_agrupadas) == 1:
+        resultado_inv = df_inventario[df_inventario[columna_producto_real] == coincidencias_agrupadas[0]]
         coincide_producto = True
-        for p in coincidencias_agrupadas:
-            partes = p.split()
-            if partes:
-                sustantivos_productos_coincidentes.append(partes[0].lower())
-        sustantivos_productos_coincidentes = list(set(sustantivos_productos_coincidentes))
+        sustantivos_productos_coincidentes = [coincidencias_agrupadas[0].split()[0].lower()]
+    elif inventario_habilitado and any(p.lower() == consulta_limpia for p in df_inventario[columna_producto_real].astype(str).str.lower().tolist()):
+        resultado_inv = df_inventario[df_inventario[columna_producto_real].astype(str).str.lower() == consulta_limpia]
+        coincide_producto = True
+        sustantivos_productos_coincidentes = [consulta_limpia.split()[0]]
+
 
     # Armado dinámico de la planilla de inventario
     html_inventario = ""
@@ -437,6 +457,7 @@ def procesar_consulta(consulta):
             html_inventario += "</tr>"
             
         html_inventario += "</tbody></table></div>"
+
 
     resultados_pdf = buscar_en_pdfs(
         consulta, 
@@ -483,6 +504,8 @@ def procesar_consulta(consulta):
         "html": html_inventario + html_pdfs
     }
 
+
+# --- 6. INTERFAZ DE GRADIO ---
 warm_theme = gr.themes.Default(
     primary_hue="orange",
     secondary_hue="amber",
