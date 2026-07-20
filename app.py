@@ -286,16 +286,16 @@ def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None
                 continue  # Ignora este párrafo ajeno (ej: descarta "pantalón blanco" si buscábamos arroz)
         
         # BOOST POR PALABRAS CLAVE: Si hay coincidencia léxica exacta en consultas de alta precisión
-        score_final = score.item()
-        
-        # Incrementar prioridad masivamente para consultas específicas de destinatarios
+        # Incrementar prioridad masivamente para consultas de destinatarios
         if "destinatario" in query_norm or "destinatarios" in query_norm:
             if "destinatario" in chunk_norm or "destinatarios" in chunk_norm:
                 score_final += 0.45  # Impulso muy potente al fragmento exacto de destinatarios
         
         # Incrementar prioridad masivamente para consultas de valores organizacionales
         if "valor" in query_norm or "valores" in query_norm:
-            if "valores" in chunk_norm or "valores orientados" in chunk_norm:
+            # Se restringe el boost para que aplique únicamente a los valores corporativos y éticos,
+            # evitando falsos positivos con "valores" entendido como dinero o activos financieros (robo).
+            if "valores orientados" in chunk_norm or "valores organizacionales" in chunk_norm or ("valores" in chunk_norm and ("honestidad" in chunk_norm or "calidez" in chunk_norm)):
                 score_final += 0.45  # Impulso muy potente al fragmento exacto de valores corporativos
 
         if "manual" in query_norm and "manual" in chunk_norm:
