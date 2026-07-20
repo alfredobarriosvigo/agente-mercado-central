@@ -147,17 +147,19 @@ def cargar_base_de_conocimiento():
                         })
                 else:
                     inyectar_datos_de_respaldo(nombre_archivo)
+            else:
+                inyectar_datos_de_respaldo(nombre_archivo)
         except Exception as e:
             print(f"Error leyendo PDF {nombre_archivo} ({e}). Usando datos de respaldo.")
             inyectar_datos_de_respaldo(nombre_archivo)
 
 
 def inyectar_datos_de_respaldo(nombre_archivo):
-    """Inyecta textos de consulta estructurados si los PDFs están vacíos o corruptos."""
+    """Inyecta textos de consulta estructurados si los PDFs están vacíos, no existen o están corruptos."""
     respaldo = {
         "FAQ.pdf": [
             "¿Cuáles son los horarios de atención al público general del Mercado Central? El mercado opera las 24 horas del día, los 365 días del año de forma ininterrumpida. Las oficinas de facturación y administración atienden de lunes a viernes de 08:00 a 17:00 hs.",
-            "¿El estacionamiento tiene costo dentro del predio? El ingreso y estacionamiento de vehículos particulares livianos es completamente gratuito durante las primeras 2 horas para todos los clientes que ingresen al supermercado. Los transportistas de gran porte para carga y descarga abonan una tarifa fija reglamentada en la cabina.",
+            "¿El estacionamiento tiene algún costo para los clientes? Nuestros clientes disfrutan de estacionamiento gratuito durante las primeras 2 horas, siempre y cuando presenten un ticket de compra con consumo mínimo de $150 MXN (o su equivalente en moneda local según la sucursal) al momento de validar su boleto en el módulo de Atención a Clientes o en las máquinas de validación ubicadas en los accesos al estacionamiento. Transcurrido el periodo de cortesía, o en caso de no contar con ticket de compra válido, se aplicará la tarifa comercial vigente por hora o fracción, la cual está publicada en las pantallas y señales de los accesos vehiculares de cada unidad. Las tarifas pueden variar ligeramente entre sucursales según el municipio, alcaldía o ciudad donde se encuentren. Clientes registrados en el programa \"Cliente VIP Central\" con nivel Oro o Diamante gozan de hasta 4 horas de estacionamiento gratuito por visita. Para motocicletas y bicicletas, contamos con áreas designadas y gratuitas sin límite de tiempo, fomentando la movilidad sostenible.",
             "¿Puedo calentar mis alimentos durante mi turno en las instalaciones de la empresa? Sí, todos los colaboradores cuentan con un comedor común equipado con hornos microondas y refrigeradores para el correcto almacenamiento de sus viandas durante su descanso programado."
         ],
         "Manual_Proveedores-Politicas_Compra.pdf": [
@@ -166,7 +168,7 @@ def inyectar_datos_de_respaldo(nombre_archivo):
         ],
         "Politica de ATC.pdf": [
             "Para el año 2024, Mercado Central 24h opera con más de 85 sucursales entre México y Latinoamérica... 1.2 Misión Ofrecer a nuestras familias latinoamericanas una experiencia de compra de alta calidad... 1.3 Visión Ser la cadena de supermercados de mayor confianza...",
-            "1.4 Valores Orientados al Cliente \n• Honestidad: Precios claros, políticas transparentes, sin sorpresas desagradables. \n• Respeto: Cada cliente es tratado con la dignidad que merece, sin importar el monto de su compra ni la hora de su visita. \n• Calidez: La atención en Mercado Central 24h lleva el trato cercano y hospitalario que caracteriza a la cultura mexicana. \n• Compromiso: Respondemos por nuestros productos y nuestro servicio. Si algo no está bien, lo corrigimos sin demora. \n• Innovación: Buscamos constantemente mejorar la experiencia del cliente a través de tecnología, capacitación y escucha activa. \n• Sustentabilidad: Operamos con conciencia del impacto ambiental y social de nuestras decisiones.",
+            "1.4 Valores Orientados al Cliente \n• Honestidad: Precios claros, políticas transparentes, sin sorpresas desagradables. \n• Respeto: Cada cliente es tratado con la dignidad que merece, sin importar el monto de su compra ni la hora de su visita. \n• Calidez: La atención en Mercado Central 24h lleva el trato cercano y hospitalario que caracteriza a la cultura mexicana. \n• Compromiso: Respondemos por nuestros productos y nuestro servicio. Si algo no está bien, lo corrigimos sin demora. \n• Innovación: Buscamos constantemente mejorar la experiencia del cliente a través de tecnología, capacitación and escucha activa. \n• Sustentabilidad: Operamos con conciencia del impacto ambiental y social de nuestras decisiones.",
             "1.5 Compromiso de la Dirección General La Dirección General de Mercado Central 24h asume un compromiso público e irrevocable con la satisfacción de cada cliente que cruza las puertas de cualquiera de nuestras tiendas. Este documento no es un trámite administrativo: es la expresión escrita de los valores que guían a cada uno de nuestros más de 14,000 colaboradores en su trabajo diario."
         ],
         "Reglamento_Interno-Proc_Operativos.pdf": [
@@ -199,6 +201,10 @@ def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None
     
     resultados_filtrados = []
     query_norm = consulta.lower()
+    
+    # Palabras clave de estacionamiento para validación cruzada estricta
+    terminos_estacionar = ["estacionamiento", "estacionar", "parqueo", "cochera", "garaje"]
+    consulta_es_estacionamiento = any(term in query_norm for term in terminos_estacionar)
     
     for idx, score in enumerate(cosine_scores):
         chunk_original = documentos_extraidos[idx]["contenido"]
@@ -246,6 +252,15 @@ def buscar_en_pdfs(consulta, coincide_producto=False, sustantivos_productos=None
             else:
                 score_final -= 0.20
 
+        # 4. Control de Contexto Estricto y Hermético para Estacionamiento (CORRECCIÓN DE ERROR)
+        if consulta_es_estacionamiento:
+            # Solo los fragmentos que contengan palabras directas de estacionamiento reciben el bono masivo
+            if any(term in chunk_norm for term in terminos_estacionar):
+                score_final += 0.85
+            else:
+                # Cualquier fragmento que no trate sobre estacionamiento es drásticamente descartado
+                score_final -= 0.80
+
         # C. FILTRADO POR UMBRAL DE RELEVANCIA
         umbral_limite = 0.45 if coincide_producto else 0.32
         
@@ -280,14 +295,14 @@ def procesar_consulta(consulta):
     global columna_producto_real
     consulta_limpia = consulta.strip().lower()
     
-    # Ampliamos la lista de stop words para evitar falsos positivos con preposiciones o conectores de una letra como "a"
+    # Ampliamos la lista de stop words para evitar falsos positivos con conectores e interjecciones comunes
     stop_words = {
         "y", "sus", "de", "con", "la", "el", "los", "las", "un", "una", "unos", "unas", 
         "para", "por", "en", "sobre", "del", "al", "que", "es", "son", "cuál", "cual", "cuales", "cuáles",
         "ver", "buscar", "precio", "precios", "stock", "inventario", "mostrar", "qué", "que",
         "a", "o", "u", "e", "este", "esta", "estos", "estas", "ese", "esa", "esos", "esas",
         "aquello", "aquella", "como", "cómo", "dónde", "donde", "cuando", "cuándo", "quién", "quien",
-        "nosotros", "ellos", "usted", "ustedes", "mi", "mis", "tu", "tus", "su", "sus"
+        "nosotros", "ellos", "usted", "ustedes", "mi", "mis", "tu", "tus", "su", "sus", "debe", "deber"
     }
     
     # Palabras clave orientadas exclusivamente a políticas, manuales u organización
@@ -297,7 +312,7 @@ def procesar_consulta(consulta):
         "atc", "atención", "atencion", "cliente", "clientes", "proveedor", "proveedores", 
         "compra", "compras", "horario", "horarios", "estacionamiento", "estacionamientos",
         "sanción", "sanciones", "falta", "faltas", "medida", "medidas", "disciplinaria", "disciplinarias",
-        "faq", "faqs", "pregunta", "preguntas"
+        "faq", "faqs", "pregunta", "preguntas", "estacionar", "parqueo", "cochera"
     }
     
     tokens = [t for t in re.split(r'\W+', consulta_limpia) if t]
@@ -331,13 +346,12 @@ def procesar_consulta(consulta):
             palabras_producto = re.split(r'\W+', p_lower)
             
             if contiene_tema_corporativo:
-                # Si la pregunta se refiere a temas corporativos (ej. valores, clientes, políticas),
+                # Si la pregunta se refiere a temas corporativos (ej. valores, clientes, políticas, estacionamiento),
                 # NO permitimos que palabras del vocabulario corporativo gatillen coincidencia con el inventario.
-                # Solamente buscaríamos coincidencias si hay una palabra de producto explícita y su coincidencia es exacta.
                 match_exacto = False
                 for pc in palabras_clave_filtradas:
                     if pc in palabras_corporativas:
-                        continue  # Se omite 'valores', 'clientes', etc., en la búsqueda de productos
+                        continue  # Se omite 'valores', 'clientes', 'estacionamiento' en la búsqueda de productos
                     if pc in palabras_producto:
                         match_exacto = True
                         break
@@ -371,6 +385,7 @@ def procesar_consulta(consulta):
         resultado_inv = df_inventario[df_inventario[columna_producto_real].astype(str).str.lower() == consulta_limpia]
         coincide_producto = True
         sustantivos_productos_coincidentes = [consulta_limpia.split()[0]]
+
 
     # Armado dinámico de la planilla de inventario
     html_inventario = ""
@@ -406,6 +421,7 @@ def procesar_consulta(consulta):
             html_inventario += "</tr>"
             
         html_inventario += "</tbody></table></div>"
+
 
     resultados_pdf = buscar_en_pdfs(
         consulta, 
